@@ -5,4 +5,4 @@
 .idea
 
 # ignore dataset files
-_scr.cifar
+data

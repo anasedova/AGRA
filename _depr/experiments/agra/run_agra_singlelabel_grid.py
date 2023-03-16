@@ -9,9 +9,9 @@ import numpy as np
 from scipy import stats
 from itertools import permutations
 
-from src.single_label.gradient_matching_single_label import train_grad_match_with_gold
-from src.single_label.utils import set_seed, load_model
-from src.single_label.wrench_dataload import prepare_data
+from depr.src.single_label.gradient_matching_single_label import train_grad_match_with_gold
+from depr.src import set_seed, load_model
+from depr.src.single_label.wrench_dataload import prepare_data
 
 logger = logging.getLogger(__name__)
 

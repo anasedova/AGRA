@@ -5,9 +5,9 @@ import statistics
 import numpy as np
 from scipy import stats
 
-from src.single_label.gradient_matching_single_label import train_grad_match_with_gold
-from src.single_label.utils import set_seed
-from src.single_label.wrench_dataload import prepare_data
+from depr.src.single_label.gradient_matching_single_label import train_grad_match_with_gold
+from depr.src import set_seed
+from depr.src.single_label.wrench_dataload import prepare_data
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ train_sentences_ds, train_labels_ds, dev_sentences, dev_labels, test_sentences, 
 
 sample_weights = weights if use_weights else None
 
-# which averaging will be used for AGRA update (when we optimizing towards the F1 score)
+# which averaging will be used for AGRA update (when optimizing towards the F1 score)
 metric_avg = "binary" if max(gold_labels) == 1 else "macro"
 # which averaging will be used for evaluation score calculation
 crit = "binary" if max(gold_labels) == 1 else "macro"

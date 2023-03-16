@@ -7,7 +7,7 @@ from torch import nn, Tensor
 from torch.nn import Module
 from torch.optim.optimizer import Optimizer
 
-from src.multi_label import autograd_hacks
+from depr.src.multi_label import autograd_hacks
 
 
 def calculate_label(

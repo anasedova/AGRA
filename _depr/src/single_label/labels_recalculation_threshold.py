@@ -9,8 +9,8 @@ from torch import Tensor
 from torch.nn import Module
 from torch.optim.optimizer import Optimizer
 
-from src.single_label import autograd_hacks
-from src.single_label.autograd_hacks import clear_backprops
+from depr.src.single_label import autograd_hacks
+from depr.src.single_label.autograd_hacks import clear_backprops
 
 logger = logging.getLogger(__name__)
 

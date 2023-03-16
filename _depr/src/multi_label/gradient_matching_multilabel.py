@@ -9,10 +9,10 @@ import torch
 from torch import optim, nn
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
-from src.multi_label.eval import make_plots, eval_performance, collect_statistics, make_legend
-from src.multi_label.labels_recalculation_binary_multilabel import calculate_label, F1LossMulti, MaskedBCELoss
-from src.multi_label.logistic_regression import MaxEntNetwork
-from src.multi_label.utils_multilabel import set_seed, AGRADataset
+from depr.src.multi_label.eval import make_plots, eval_performance, collect_statistics, make_legend
+from depr.src.multi_label.labels_recalculation_binary_multilabel import calculate_label, F1LossMulti, MaskedBCELoss
+from depr.src.multi_label.logistic_regression import MaxEntNetwork
+from depr.src.multi_label.utils_multilabel import set_seed, AGRADataset
 
 logger = logging.getLogger(__name__)
 

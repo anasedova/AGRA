@@ -10,13 +10,13 @@ import torch
 from torch import optim, nn
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
-from src.single_label.eval import (
+from depr.src.single_label.eval import (
     collect_statistics, make_plots, make_plots_legend, make_plots_gold_legend, eval_grad_match, eval_gold,
     make_plots_gold
 )
-from src.single_label.labels_recalculation_threshold import calculate_label, F1Loss
-from src.single_label.logistic_regression import MaxEntNetwork
-from src.single_label.utils import AGRADatasetWithGold, set_seed
+from depr.src.single_label.labels_recalculation_threshold import calculate_label, F1Loss
+from depr.src.single_label.logistic_regression import MaxEntNetwork
+from depr.src.single_label.utils import AGRADatasetWithGold, set_seed
 
 logger = logging.getLogger(__name__)
 

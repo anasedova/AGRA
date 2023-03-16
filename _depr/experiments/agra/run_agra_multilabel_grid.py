@@ -6,8 +6,8 @@ import statistics
 import numpy as np
 from scipy import stats
 
-from src.multi_label.gradient_matching_multilabel import train_grad_match_multilabel
-from src.multi_label.utils_multilabel import set_seed, load_data
+from depr.src import train_grad_match_multilabel
+from depr.src.multi_label.utils_multilabel import set_seed, load_data
 
 logger = logging.getLogger(__name__)
 

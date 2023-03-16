@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from sklearn.metrics import classification_report
-from src.single_label.utils import AGRADataset
+from depr.src.single_label.utils import AGRADataset
 
 logger = logging.getLogger(__name__)
 
