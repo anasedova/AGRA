@@ -3,3 +3,6 @@
 
 # ignore cache files
 .idea
+
+# ignore dataset files
+_scr.cifar
