@@ -6,15 +6,15 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torchvision.models as models
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 from torch.utils.data import DataLoader, WeightedRandomSampler
 from torchvision.datasets import ImageFolder
 from tqdm.auto import trange
 from transformers import AdamW, get_linear_schedule_with_warmup
 
-from scr.DeepAGRA.labels_recalculation_last_layer import calculate_label
-from scr.eval_plots import make_plots_gold
-from scr.utils import get_loss
+from src.DeepAGRA.labels_recalculation_last_layer import calculate_label
+from src.eval_plots import make_plots_gold
+from src.utils import get_loss
 from wrench.basemodel import BaseTorchClassModel
 from wrench.dataset import BaseDataset
 from wrench.evaluation import METRIC, metric_to_direction
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 collate_fn = construct_collate_fn_trunc_pad('mask')
 
 
-class ResNetClassifierModelWithAGRA(BaseTorchClassModel):
+class ResNetClassifierModelWithDeepAGRA(BaseTorchClassModel):
     def __init__(self,
                  model_name: Optional[str] = 'resnet50',
                  lr: Optional[float] = 3e-5,
@@ -43,36 +43,43 @@ class ResNetClassifierModelWithAGRA(BaseTorchClassModel):
                  stats: bool = False,
                  storing_loc: str = None,
                  n_steps: Optional[int] = 10000,
-                 fine_tune_layers: Optional[int] = -1,
-                 binary_mode: Optional[bool] = False,
+                 fine_tune_layers: Optional[int] = -1
                  ):
         super().__init__()
-        self.hyperparas = {
-            'model_name': model_name,
-            'fine_tune_layers': fine_tune_layers,
-            'lr': lr,
-            'l2': l2,
-            'max_tokens': max_tokens,
-            'batch_size': batch_size,
-            'real_batch_size': real_batch_size,
-            'test_batch_size': test_batch_size,
-            'comp_batch_size': comp_batch_size,  # maybe just use batch_size
-            'comp_loss': comp_loss,
-            'other': other,
-            'agra_threshold': agra_threshold,
-            'agra_weights': agra_weights,
-            'ignore_index': ignore_index,
-            'stats': stats,
-            'storing_loc': storing_loc,
-            'n_steps': n_steps,
-            'binary_mode': binary_mode,
-        }
+
+        self.model_name = model_name
+        self.lr = lr
+        self.l2 = l2
+        self.n_steps = n_steps
+        self.max_tokens = max_tokens
+        self.batch_size = batch_size
+        self.comp_batch_size = batch_size if comp_batch_size is None else comp_batch_size
+        self.real_batch_size = batch_size \
+            if real_batch_size is None or (real_batch_size == -1 or batch_size < real_batch_size) else real_batch_size
+        self.test_batch_size = batch_size if test_batch_size is None else test_batch_size
+
+        self.accum_steps = self.batch_size // self.real_batch_size
+        self.comp_batch_size = comp_batch_size
+        self.test_batch_size = test_batch_size
+        self.comp_loss = comp_loss
+        self.other = other
+        self.agra_threshold = agra_threshold
+        self.agra_weights = agra_weights
+        self.ignore_index = ignore_index
+        self.stats = stats
+        self.storing_loc = storing_loc
+        self.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        self.fine_tune_layers = fine_tune_layers
+
+        self.direction, self.metric_fn = None, None
+
+        self.hyperparas = self._initialize_hyperparams_dict()
 
         self.model = None
         self.device = None
 
     def fit(self,
-            dataset_train: Union[BaseDataset],
+            dataset_train: Dataset,
             y_train: Optional[np.ndarray] = None,
             dataset_valid: Optional[Tuple[BaseDataset, ImageFolder]] = None,
             y_valid: Optional[np.ndarray] = None,
@@ -89,45 +96,22 @@ class ResNetClassifierModelWithAGRA(BaseTorchClassModel):
         if not verbose:
             logger.setLevel(logging.ERROR)
 
+        self.define_metric(metric)
         self._update_hyperparas(**kwargs)
-        hyperparas = self.hyperparas
-
-        n_steps = hyperparas['n_steps']
-        if hyperparas['real_batch_size'] == -1 or hyperparas['batch_size'] < hyperparas['real_batch_size']:
-            hyperparas['real_batch_size'] = hyperparas['batch_size']
-        self.accum_steps = hyperparas['batch_size'] // hyperparas['real_batch_size']
-        self.comp_batch_size = hyperparas['comp_batch_size']
-        self.test_batch_size = hyperparas['test_batch_size']
-        self.comp_loss = hyperparas['comp_loss']
-        self.other = hyperparas['other']
-        self.agra_threshold = hyperparas['agra_threshold']
-        self.agra_weights = hyperparas['agra_weights']
-        self.ignore_index = hyperparas['ignore_index']
-        self.stats = hyperparas['stats']
-        self.storing_loc = hyperparas['storing_loc']
-        self.direction = metric_to_direction(metric)
-        self.device = device
-
-        # initialize metric
-        if isinstance(metric, Callable):
-            metric_fn = metric
-        else:
-            metric_fn = METRIC[metric]
-        self.metric_fn = metric_fn
 
         y_train = torch.Tensor(y_train).to(self.device)  # weak labels
 
         train_dataloader = torch.utils.data.DataLoader(
             dataset_train,
-            batch_size=hyperparas['batch_size'],
+            batch_size=self.batch_size,
             shuffle=True,
             drop_last=True,  # Don't train on last batch: could be 1 noisy example. % todo: clarify whether we need it
         )
 
         if dataset_valid:
-            val_loader = torch.utils.data.DataLoader(dataset_valid, batch_size=hyperparas['batch_size'], shuffle=False)
+            val_loader = torch.utils.data.DataLoader(dataset_valid, batch_size=self.batch_size, shuffle=False)
             if y_valid is None:
-                y_valid = np.array(dataset_valid.labels)     # valid labels
+                y_valid = np.array(dataset_valid.labels)  # valid labels
 
         # determine the number of classes
         if self.other is not None:
@@ -136,21 +120,21 @@ class ResNetClassifierModelWithAGRA(BaseTorchClassModel):
             num_classes = int(max(y_train) + 1)
 
         if self.agra_weights is None:
-            agra_weights = np.ones(len(dataset_train))
-        agra_weights = torch.FloatTensor(agra_weights)
+            self.agra_weights = np.ones(len(dataset_train))
+        self.agra_weights = torch.FloatTensor(self.agra_weights)
 
         # initialize the model to be trained
-        self.model = models.__dict__[hyperparas['model_name']](num_classes=num_classes).to(device)
+        self.model = models.__dict__[self.model_name](num_classes=num_classes).to(device)
 
         # initialize comparison loss
         comparison_criterion = get_loss(self.comp_loss, num_classes)
         # initialize update loss
         criterion = torch.nn.CrossEntropyLoss(reduction='mean')
         # initialize optimizer
-        optimizer = AdamW(self.model.parameters(), lr=hyperparas['lr'], weight_decay=hyperparas['l2'])
+        optimizer = AdamW(self.model.parameters(), lr=self.lr, weight_decay=self.l2)
 
         # Set up the learning rate scheduler
-        scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=n_steps)
+        scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=self.n_steps)
 
         valid_flag = self._init_valid_step(dataset_valid, y_valid, metric, self.direction, patience, tolerance)
 
@@ -158,7 +142,7 @@ class ResNetClassifierModelWithAGRA(BaseTorchClassModel):
         last_step_log = {}
         stats_all = []
         try:
-            with trange(n_steps, desc=f"[TRAIN] {hyperparas['model_name']} Classifier", unit="steps",
+            with trange(self.n_steps, desc=f"[TRAIN] {self.model_name} Classifier", unit="steps",
                         disable=not verbose, ncols=150, position=0, leave=True) as pbar:
                 cnt = 0
                 step = 0
@@ -171,13 +155,11 @@ class ResNetClassifierModelWithAGRA(BaseTorchClassModel):
                     if len(batch) <= 1:
                         continue
 
-                    batch = batch.to(self.device)
-                    labels = labels.to(self.device)
+                    batch, labels = batch.to(self.device), labels.to(self.device)
 
                     # select samples to be ignored and calculate the new labels
                     ignore_samples, chosen_labels = self.choose_samples_n_labels(
-                        batch, labels, copy.deepcopy(self.model), dataset_train, comparison_criterion, agra_weights,
-                        batch_num
+                        batch, labels, copy.deepcopy(self.model), dataset_train, comparison_criterion
                     )
 
                     if len(chosen_labels) <= 0:
@@ -191,15 +173,17 @@ class ResNetClassifierModelWithAGRA(BaseTorchClassModel):
 
                     # compute loss only with the selected examples
                     loss = criterion(outputs, chosen_labels)
-                    optimizer.zero_grad()
-                    loss.backward()
-                    optimizer.step()
                     cnt += 1  # cnt here or outside
 
                     scheduler.step()
                     if cnt % self.accum_steps == 0:
                         # Clip the norm of the gradients to 1.0.
                         nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+
+                        loss.backward()
+                        optimizer.step()
+                        optimizer.zero_grad()
+
                         step += 1
 
                         if valid_flag and step % evaluation_step == 0:
@@ -219,7 +203,7 @@ class ResNetClassifierModelWithAGRA(BaseTorchClassModel):
                         pbar.update()
                         pbar.set_postfix(ordered_dict=last_step_log)
 
-                        if step >= n_steps:
+                        if step >= self.n_steps:
                             break
 
                     # # compute statistics
@@ -251,7 +235,7 @@ class ResNetClassifierModelWithAGRA(BaseTorchClassModel):
             if self.stats is True:
                 # plot statistics up to best step
                 stats_all = stats_all[:(self.best_step - 1)]
-                make_plots_gold(stats_all, smoothing_length=10, other=other, storing_loc=storing_loc)
+                make_plots_gold(stats_all, smoothing_length=10, other=self.other, storing_loc=self.storing_loc)
 
         except KeyboardInterrupt:
             logger.info(f'KeyboardInterrupt! do not terminate the process in case need to save the best model')
@@ -286,10 +270,10 @@ class ResNetClassifierModelWithAGRA(BaseTorchClassModel):
         return self.metric_fn(gold_labels, predictions)
 
     def choose_samples_n_labels(
-            self, batch, labels, model, dataset_train, comparison_criterion, agra_weights, batch_num
+            self, batch, labels, model, dataset_train, comparison_criterion
     ) -> Tuple[np.array, np.array]:
         # sample a comparison batch
-        comp_idx = list(WeightedRandomSampler(agra_weights, num_samples=self.comp_batch_size, replacement=False))
+        comp_idx = list(WeightedRandomSampler(self.agra_weights, num_samples=self.comp_batch_size, replacement=False))
         comp_dataset = torch.utils.data.Subset(dataset_train, comp_idx)
         comp_batch = next(iter(DataLoader(comp_dataset, batch_size=len(comp_idx))))
 
@@ -307,8 +291,7 @@ class ResNetClassifierModelWithAGRA(BaseTorchClassModel):
             threshold=self.agra_threshold,
             ignore_index=self.ignore_index,
             device=self.device,
-            layer_aggregation=False,
-            batch_num=batch_num
+            layer_aggregation=False
         )
 
         # remove ignored samples and their model outputs
@@ -316,6 +299,36 @@ class ResNetClassifierModelWithAGRA(BaseTorchClassModel):
         chosen_labels = np.delete(chosen_labels, ignore_samples).to(self.device)
 
         return ignore_samples, chosen_labels
+
+    def define_metric(self, metric: Optional[Union[str, Callable]]) -> None:
+        self.direction = metric_to_direction(metric)
+        # initialize metric
+        if isinstance(metric, Callable):
+            metric_fn = metric
+        else:
+            metric_fn = METRIC[metric]
+        self.metric_fn = metric_fn
+
+    def _initialize_hyperparams_dict(self):
+        return {
+            'model_name': self.model_name,
+            'fine_tune_layers': self.fine_tune_layers,
+            'lr': self.lr,
+            'l2': self.l2,
+            'max_tokens': self.max_tokens,
+            'batch_size': self.batch_size,
+            'real_batch_size': self.real_batch_size,
+            'test_batch_size': self.test_batch_size,
+            'comp_batch_size': self.comp_batch_size,  # maybe just use batch_size
+            'comp_loss': self.comp_loss,
+            'other': self.other,
+            'agra_threshold': self.agra_threshold,
+            'agra_weights': self.agra_weights,
+            'ignore_index': self.ignore_index,
+            'stats': self.stats,
+            'storing_loc': self.storing_loc,
+            'n_steps': self.n_steps
+        }
 
 
 def accuracy(output, target, topk=(1,)):
@@ -341,4 +354,3 @@ def remove_ignored(outputs, ignore_samples):
     remove_mask = np.zeros([len(outputs)])
     remove_mask[ignore_samples] = 1
     return outputs[remove_mask != 1]
-

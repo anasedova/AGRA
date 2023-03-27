@@ -2,7 +2,7 @@ import torch
 import numpy as np
 import random
 
-from _scr.f1loss import F1Loss
+from src.f1loss import F1Loss
 
 
 def set_seed(seed: int) -> None:

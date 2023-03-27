@@ -11,14 +11,14 @@ from torch.utils.data import DataLoader
 from tqdm.auto import trange
 from transformers import get_linear_schedule_with_warmup
 
-from _scr.AGRA.labels_recalculation_logreg import calculate_label
-from _scr.utils import get_statistics, get_loss
+from src.AGRA.labels_recalculation_logreg import calculate_label
+from src.utils import get_statistics, get_loss
 from wrench.backbone import BackBone, LogReg
 from wrench.basemodel import BaseTorchClassModel
 from wrench.dataset import BaseDataset, TorchDataset
 from wrench.utils import cross_entropy_with_probs
 # from _src.labels_recalculation_logreg import calculate_label
-from _scr.eval_plots import make_plots_gold
+from src.eval_plots import make_plots_gold
 
 logger = logging.getLogger(__name__)
 
@@ -95,21 +95,22 @@ class LogRegModelWithAGRA(BaseTorchClassModel):
         stats = hyperparas['stats']
         storing_loc = hyperparas['storing_loc']
 
-        y_train = torch.Tensor(y_train).to(device) # weak labels
-        y_gold = torch.Tensor(dataset_train.labels) # gold labels
+        if y_train is None:
+            y_train = torch.Tensor(dataset_train.weak_labels).to(device)
+        else:
+            y_train = torch.Tensor(y_train).to(device)  # weak labels
+        y_gold = torch.Tensor(dataset_train.labels)     # gold labels
 
         if agra_weights is None:
-            agra_weights = np.ones(len(dataset_train))
+            # agra_weights = np.ones(len(dataset_train))
+            agra_weights = np.ones(dataset_train.features.shape[0])
         agra_weights = torch.FloatTensor(agra_weights)
-
-        if y_valid is None:
-            y_valid = torch.tensor(dataset_valid.labels) # validation labels
 
         # determine the number of classes
         if other is not None:
-            num_classes = int(max(max(y_train), max(y_valid), other) + 1)
+            num_classes = int(max(other, max(dataset_train.labels), max(dataset_valid.labels))) + 1
         else:
-            num_classes = int(max(max(y_train), max(y_valid)) + 1)
+            num_classes = int(max(max(dataset_train.labels), max(dataset_valid.labels))) + 1
 
         input_size = dataset_train.features.shape[1]    # size of feature vector
 
@@ -117,9 +118,7 @@ class LogRegModelWithAGRA(BaseTorchClassModel):
         comparison_criterion = get_loss(comp_loss, num_classes)
 
         model = LogReg(
-            input_size=input_size,
-            n_class=num_classes,
-            binary_mode=hyperparas['binary_mode'],
+            input_size=input_size, n_class=num_classes, binary_mode=hyperparas['binary_mode'],
         ).to(device)
         self.model = model
 
@@ -128,13 +127,14 @@ class LogRegModelWithAGRA(BaseTorchClassModel):
         # Set up the learning rate scheduler
         scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=n_steps)
 
-        valid_flag = self._init_valid_step(dataset_valid, y_valid, metric, direction, patience, tolerance)
+        valid_flag = self._init_valid_step(dataset_valid, metric=metric)
 
         history = {}
         last_step_log = {}
         stats_all = []
         try:
-            with trange(n_steps, desc="[TRAIN] Linear Classifier", unit="steps", disable=not verbose, ncols=150, position=0, leave=True) as pbar:
+            with trange(n_steps, desc="[TRAIN] Linear Classifier", unit="steps", disable=not verbose, ncols=150,
+                        position=0, leave=True) as pbar:
                 model.train()
                 step = 0
                 for batch in train_dataloader:

@@ -1,17 +1,13 @@
-import copy
-import math
-from typing import Callable, Tuple
 import logging
+from typing import Callable, Tuple
 
 import numpy as np
 import torch
 from torch import Tensor
 from torch.nn import Module
 
-from _scr import autograd_hacks
-from _scr.autograd_hacks import clear_backprops
-# from src import autograd_hacks
-# from src.autograd_hacks import clear_backprops
+from src import autograd_hacks
+from src.autograd_hacks import clear_backprops
 from wrench.utils import cross_entropy_with_probs
 
 logger = logging.getLogger(__name__)
