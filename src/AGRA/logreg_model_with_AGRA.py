@@ -181,7 +181,7 @@ class LogRegModelWithAGRA(BaseTorchClassModel):
                         scheduler.step()
 
                     if valid_flag and step % evaluation_step == 0:
-                        metric_value, early_stop_flag, info = self._valid_step(step)
+                        metric_value, early_stop_flag, info = self._valid_step(step, patience=patience)
                         if early_stop_flag:
                             logger.info(info)
                             break

@@ -21,7 +21,8 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 
 
 def load_train_data_for_agra(
-        dataset, data_path, train_labels_path: str = None, num_valid_samples: int = None, encoding: str = "resnet50"
+        dataset, data_path, train_labels_path: str = None, num_valid_samples: int = None, encoding: str = "resnet50",
+        finetuning: bool =False, finetuning_epochs : int = 2
 ):
     if dataset in ['youtube', 'sms', 'trec', 'yoruba', 'hausa']:
         # load wrench dataset
@@ -42,7 +43,8 @@ def load_train_data_for_agra(
 
         # load Cifar and CheXpert datasets and get encodings with resnet-50
         train_features, valid_features, test_features = load_image_dataset(
-            data_path, dataset, train_data, test_data, valid_data, encoding
+            data_path, dataset, train_data, test_data, valid_data, encoding, finetuning=finetuning,
+            finetuning_epochs=finetuning_epochs
         )
 
         # upload the labels from the file
@@ -58,7 +60,7 @@ def load_train_data_for_agra(
     else:
         raise ValueError(f"Dataset {dataset} is not yet supported.")
 
-    return train_data, valid_data, test_data, train_labels
+    return train_data, valid_data, test_data, y_train
 
 
 if __name__ == '__main__':
@@ -73,6 +75,8 @@ if __name__ == '__main__':
                         help="Size of a valid set to be sampled from the test set if no valid set is available")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--encoding", type=str, default=None)
+    parser.add_argument("--finetuning", type=bool, default=False)
+    parser.add_argument("--finetuning_epochs", type=int, default=2)
     parser.add_argument("--modification", type=str, default="last")
     parser.add_argument("--other", type=int, default=None)
     parser.add_argument("--closs", type=str, default='CE', choices=['CE', 'F1'])
@@ -93,7 +97,7 @@ if __name__ == '__main__':
 
     # define the name of the folder where the results will be stored
     results_folder = os.path.join(args.output_path, "results", 'single_run', 'agra', args.dataset,
-                                  f'model_{args.model}_weights_{args.weights}_comp_{args.closs}_other_{str(args.other)}')
+                                  f'model_logreg_weights_{args.weights}_comp_{args.closs}_other_{str(args.other)}')
     os.makedirs(results_folder, exist_ok=True)
     output_file = open(os.path.join(results_folder, "test_performance.txt"), "w")
 
@@ -102,7 +106,8 @@ if __name__ == '__main__':
 
     # load dataset and training labels (mv or separately provided)
     train_dataset, valid_dataset, test_dataset, train_labels = load_train_data_for_agra(
-        args.dataset, args.data_path, args.train_labels_path, args.num_valid_samples, encoding)
+        args.dataset, args.data_path, args.train_labels_path, args.num_valid_samples, encoding,
+        finetuning=args.finetuning, finetuning_epochs=args.finetuning_epochs)
 
     # compute weights for comparison batch sampling
     agra_weights = compute_weights(train_labels) if args.weights == 'True' else None
@@ -125,7 +130,9 @@ if __name__ == '__main__':
         metric=metric,
         device=device,
         evaluation_step=100,
-        verbose=True
+        verbose=True,
+
+        patience=50            # 20 by default
     )
     if isinstance(test_dataset, BaseDataset):
         metric_value = model.test(test_dataset, metric)
