@@ -6,3 +6,6 @@
 
 # ignore dataset files
 data
+
+# ignore deprecated files
+_depr*
