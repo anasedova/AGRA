@@ -55,6 +55,7 @@ def get_cifar_data(dataset_path, num_valid_samples, transformation = "standard")
             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
         ])
     elif transformation == "standard":
+        #  source: https://pytorch.org/vision/0.8/models.html
         transform_train = transforms.Compose([
             transforms.CenterCrop(224),
             transforms.Resize(256),
