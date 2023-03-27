@@ -1,12 +1,12 @@
 import logging
-from typing import Callable
+from typing import Callable, Optional
 
 import numpy as np
 import torch
 from torch import Tensor
 from torch.nn import Module
 
-from _scr.autograd_hacks import clear_backprops
+from src.autograd_hacks import clear_backprops
 from wrench.utils import cross_entropy_with_probs
 
 logger = logging.getLogger(__name__)
@@ -23,16 +23,18 @@ def calculate_label(
         comparison_criterion: Callable[[Tensor, Tensor], float],
         ignore_index: int = -100,
         other_class: int = None,
-        threshold: int = 0,
-        device: str = 'cpu',
-        layer_aggregation=False,
-        batch_num: int = None
+        threshold: float = 0,
+        device: Optional[torch.device] = None,
+        layer_aggregation: bool = False
 ) -> Tensor:
     """
     Args:
         ignore_index: the index that will be assigned
         other_class: the index of the negative class
     """
+
+    if device is None:
+        device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
     # calculate the aggregated gradient for the comparison batch
     model.zero_grad()
@@ -71,7 +73,8 @@ def calculate_label(
 
         hypothetical_labels = torch.Tensor(hypothetical_labels).long().to(device)
 
-        # compute individual losses and gradients https://github.com/ppmlguy/fastgradclip/blob/0d8bff42ab13fa3471c520a2823050ccf0ff4a21/fastgc/train.py#L46
+        # compute individual losses and gradients
+        # https://github.com/ppmlguy/fastgradclip/blob/0d8bff42ab13fa3471c520a2823050ccf0ff4a21/fastgc/train.py#L46
         model.zero_grad()
         preds = model(batch)
         losses = cross_entropy_with_probs(preds, hypothetical_labels, reduction="none")
@@ -119,11 +122,6 @@ def calculate_label(
                     scores_matching_last[sample_id, label_id] = torch.sum(sample_grad_last * grads_ds_orig_flat_last) / (
                             (torch.norm(sample_grad_last) * torch.norm(grads_ds_orig_flat_last)) + 0.000001)
 
-        if batch_num % print_step == 0:
-            print(f"Batch {batch_num}")
-            print(f"first_layer_scores: \n {scores_matching_first}")
-            print(f"last_layer_scores: \n {scores_matching_last}")
-
         clear_backprops(model)  # don't think this is necessary
         label_id += 1
 
@@ -149,7 +147,7 @@ def create_label_matching(
         return labels_matching
 
 
-def compute_aggregated_grad(preds, labels, params):
+def compute_aggregated_grad(preds, labels, params) -> List:
     loss = cross_entropy_with_probs(preds, labels, reduction="mean")
     loss.backward()
     grads = [param.grad for param in params if param.requires_grad and len(param) > 0]
