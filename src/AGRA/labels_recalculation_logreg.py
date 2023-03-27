@@ -12,6 +12,8 @@ from wrench.utils import cross_entropy_with_probs
 
 logger = logging.getLogger(__name__)
 
+device = torch.device("cpu")
+
 
 def calculate_label(
         batch,
@@ -23,8 +25,7 @@ def calculate_label(
         comparison_criterion: Callable[[Tensor, Tensor], float],
         ignore_index: int = -100,
         other_class: int = None,
-        threshold: int = 0,
-        device: str = 'cpu',
+        threshold: int = 0
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Args:
@@ -33,9 +34,12 @@ def calculate_label(
         all_labels: bool; if set to True, then all classes one after another will be tried in gradient matching
     """
 
+    # comp_batch, weak_comp_labels, model = comp_batch.to(device), weak_comp_labels.to(device), model.to(device)
     # calculate the gradient for the comparison batch
+    model = model.to(device)
     model.zero_grad()
     outputs_ds_orig = model(comp_batch)
+
     loss_ds_orig = comparison_criterion(outputs_ds_orig, weak_comp_labels)
     loss_ds_orig.backward()
     grads_ds_orig = [param.grad.detach().clone().cpu().numpy().flatten() for param in model.parameters() if
@@ -60,7 +64,7 @@ def calculate_label(
     label_id = 1
     for hypothetical_labels in labels_matching[:, 1:].T:  # first column is ignore
 
-        hypothetical_labels = torch.Tensor(hypothetical_labels).long().to(device)
+        hypothetical_labels = torch.Tensor(hypothetical_labels).long()
 
         # reset model gradients
         model.zero_grad()

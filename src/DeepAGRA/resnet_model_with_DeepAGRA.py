@@ -76,7 +76,7 @@ class ResNetClassifierModelWithDeepAGRA(BaseTorchClassModel):
         self.hyperparas = self._initialize_hyperparams_dict()
 
         self.model = None
-        self.device = None
+        self.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
     def fit(self,
             dataset_train: Dataset,
@@ -175,7 +175,6 @@ class ResNetClassifierModelWithDeepAGRA(BaseTorchClassModel):
                     loss = criterion(outputs, chosen_labels)
                     cnt += 1  # cnt here or outside
 
-                    scheduler.step()
                     if cnt % self.accum_steps == 0:
                         # Clip the norm of the gradients to 1.0.
                         nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
@@ -205,6 +204,8 @@ class ResNetClassifierModelWithDeepAGRA(BaseTorchClassModel):
 
                         if step >= self.n_steps:
                             break
+
+                    scheduler.step()
 
                     # # compute statistics
                     # if stats is True:
@@ -290,8 +291,8 @@ class ResNetClassifierModelWithDeepAGRA(BaseTorchClassModel):
             other_class=self.other,
             threshold=self.agra_threshold,
             ignore_index=self.ignore_index,
-            device=self.device,
-            layer_aggregation=False
+            layer_aggregation=False,
+            device=self.device
         )
 
         # remove ignored samples and their model outputs

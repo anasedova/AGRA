@@ -1,4 +1,4 @@
-from typing import Callable, Tuple
+from typing import Callable, Tuple, Optional
 import logging
 
 import numpy as np
@@ -6,7 +6,7 @@ import torch
 from torch import Tensor
 from torch.nn import Module
 
-from autograd_hacks import clear_backprops
+from src.autograd_hacks import clear_backprops
 from wrench.utils import cross_entropy_with_probs
 
 logger = logging.getLogger(__name__)
@@ -21,15 +21,19 @@ def calculate_label(
         comparison_criterion: Callable[[Tensor, Tensor], float],
         ignore_index: int = -100,
         other_class: int = None,
-        threshold: int = 0,
-        device: str = 'cpu',
-        layer_aggregation=False
+        threshold: float = 0.0,
+        layer_aggregation=False,
+        device: Optional[torch.device] = torch.device("cpu")
 ) -> Tensor:
     """
     Args:
         ignore_index: the index that will be assigned
         other_class: the index of the negative class
     """
+
+    batch, weak_train_labels, comp_batch, weak_comp_labels, model = \
+        batch.to(device), weak_train_labels.to(device), comp_batch.to(device), \
+        weak_comp_labels.to(device), model.to(device)
 
     # calculate the aggregated gradient for the comparison batch
     model.zero_grad()
@@ -71,7 +75,8 @@ def calculate_label(
 
         for sample_id in range(num_ds_instances):
             # don't recompute if same hypothetical label as in last iteration
-            if hypothetical_labels[sample_id] == weak_train_labels[sample_id] and label_id > 1:  # other class label already the weak label
+            if hypothetical_labels[sample_id] == weak_train_labels[
+                sample_id] and label_id > 1:  # other class label already the weak label
                 scores_matching[sample_id, label_id] = scores_matching[sample_id, label_id - 1]
 
             else:

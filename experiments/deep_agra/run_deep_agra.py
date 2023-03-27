@@ -4,8 +4,7 @@ import numpy as np
 import torch
 
 from experiments.deep_agra.utils import define_model_name
-from experiments.utils import get_cifar_data, get_mv_train_labels, load_train_labels_from_file, define_data_encoding, \
-    define_eval_metric
+from experiments.utils import get_cifar_data, get_mv_train_labels, load_train_labels_from_file, define_eval_metric
 from src.DeepAGRA.bert_model_with_DeepAGRA import BertClassifierModelWithAGRA
 from src.DeepAGRA.resnet_model_with_DeepAGRA import ResNetClassifierModelWithDeepAGRA
 from src.utils import set_seed, compute_weights
@@ -75,17 +74,14 @@ if __name__ == '__main__':
     parser.add_argument("--model", type=str, default='bert', choices=['bert', 'resnet'])  # or roberta-base
     parser.add_argument("--closs", type=str, default='CE', choices=['CE', 'F1'])
     parser.add_argument("--weights", type=str, default='False', choices=['True', 'False'])
-    parser.add_argument('--save', action='store_true')
+    parser.add_argument('--save', type=bool, default=True)
     args = parser.parse_args()
 
     # set the seed
     if args.seed is not None:
         set_seed(args.seed)
 
-    # define the way how the dataset will be encoded
-    encoding = define_data_encoding(args)
-
-    # define the model
+    # define the model to be trained
     model_name = define_model_name(args.model, args.dataset)
 
     # define the path from which the dataset will be loaded

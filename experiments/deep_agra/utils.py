@@ -7,3 +7,4 @@ def define_model_name(model_type, dataset):
         return 'resnet50'
     else:
         raise ValueError(f"Are you sure you want to use the combination of {dataset} dataset and {model_type} model?")
+

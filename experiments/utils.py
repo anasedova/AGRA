@@ -12,20 +12,6 @@ from wrench.labelmodel.majority_voting import MajorityVoting
 from snorkel.utils import probs_to_preds
 
 
-def define_data_encoding(args) -> str:
-    # define the necessary encoding if not provided
-    if args.encoding:
-        print(f"The input data will be encoded with {args.encoding}")
-        return args.encoding
-    else:
-        if args.dataset in ['youtube', 'sms', 'trec', 'yoruba', 'hausa']:
-            return "tfidf"
-        elif args.dataset in ["cifar", "chexpert"]:
-            return "resnet50"
-        else:
-            raise ValueError(f"Unknown dataset {args.dataset}, please specify how you want to encode the data")
-
-
 def define_eval_metric(dataset):
     if dataset in ['youtube', 'trec', 'cifar']:
         return 'acc'
@@ -37,7 +23,7 @@ def define_eval_metric(dataset):
         raise ValueError('Dataset not available.')
 
 
-def get_cifar_data(dataset_path, num_valid_samples, transformation = "standard"):
+def get_cifar_data(dataset_path, num_valid_samples, transformation="standard"):
     train_path = os.path.join(dataset_path, 'train')
     test_path = os.path.join(dataset_path, 'test')
     valid_path = os.path.join(dataset_path, 'valid')
@@ -102,7 +88,7 @@ def get_mv_train_labels(data):
 
 def load_train_labels_from_file(dataset_path, train_labels_path, dataset):
     assert train_labels_path is not None
-    with open(os.path.join(dataset_path, dataset, train_labels_path), 'r') as rf:
+    with open(train_labels_path, 'r') as rf:
         train_labels = json.load(rf)
     if dataset == "cifar":
         # additional postprocessing due to specificity of the cifar data

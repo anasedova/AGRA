@@ -42,20 +42,20 @@ class LogRegModelWithAGRA(BaseTorchClassModel):
                  ):
         super().__init__()
         self.hyperparas = {
-            'lr'             : lr,
-            'l2'             : l2,
-            'batch_size'     : batch_size,
+            'lr': lr,
+            'l2': l2,
+            'batch_size': batch_size,
             'comp_batch_size': comp_batch_size,
-            'comp_loss'      : comp_loss,
-            'other'          : other,
-            'agra_threshold' : agra_threshold,
-            'agra_weights'   : agra_weights,
-            'ignore_index'   : ignore_index,
-            'stats'          : stats,
-            'storing_loc'    : storing_loc,
+            'comp_loss': comp_loss,
+            'other': other,
+            'agra_threshold': agra_threshold,
+            'agra_weights': agra_weights,
+            'ignore_index': ignore_index,
+            'stats': stats,
+            'storing_loc': storing_loc,
             'test_batch_size': test_batch_size,
-            'n_steps'        : n_steps,
-            'binary_mode'    : binary_mode,
+            'n_steps': n_steps,
+            'binary_mode': binary_mode,
         }
         self.model: Optional[BackBone] = None
 
@@ -96,10 +96,10 @@ class LogRegModelWithAGRA(BaseTorchClassModel):
         storing_loc = hyperparas['storing_loc']
 
         if y_train is None:
-            y_train = torch.Tensor(dataset_train.weak_labels).to(device)
+            y_train = torch.Tensor(dataset_train.weak_labels)
         else:
-            y_train = torch.Tensor(y_train).to(device)  # weak labels
-        y_gold = torch.Tensor(dataset_train.labels)     # gold labels
+            y_train = torch.Tensor(y_train)  # weak labels
+        y_gold = torch.Tensor(dataset_train.labels)  # gold labels
 
         if agra_weights is None:
             # agra_weights = np.ones(len(dataset_train))
@@ -112,14 +112,12 @@ class LogRegModelWithAGRA(BaseTorchClassModel):
         else:
             num_classes = int(max(max(dataset_train.labels), max(dataset_valid.labels))) + 1
 
-        input_size = dataset_train.features.shape[1]    # size of feature vector
+        input_size = dataset_train.features.shape[1]  # size of feature vector
 
         # initialize comparison loss
         comparison_criterion = get_loss(comp_loss, num_classes)
 
-        model = LogReg(
-            input_size=input_size, n_class=num_classes, binary_mode=hyperparas['binary_mode'],
-        ).to(device)
+        model = LogReg(input_size=input_size, n_class=num_classes, binary_mode=hyperparas['binary_mode'])
         self.model = model
 
         optimizer = optim.Adam(model.parameters(), lr=hyperparas['lr'], weight_decay=hyperparas['l2'])
@@ -155,19 +153,19 @@ class LogRegModelWithAGRA(BaseTorchClassModel):
                     chosen_labels = calculate_label(batch, weak_train_labels, comp_batch, weak_comp_labels,
                                                     copy.deepcopy(model), comparison_criterion,
                                                     other_class=other, threshold=agra_threshold,
-                                                    ignore_index=ignore_index, device=device)
+                                                    ignore_index=ignore_index)
 
                     # compute statistics
                     if stats is True:
                         gold_train_labels = y_gold[train_samples]
                         # correctly_removed, falsely_removed, falsely_kept, correctly_kept, correctly_corrected, falsely_corrected
-                        stats_summary = get_statistics(weak_train_labels.to('cpu'), chosen_labels, gold_train_labels.long(),
-                                               other, ignore_index)
+                        stats_summary = get_statistics(weak_train_labels.to('cpu'), chosen_labels,
+                                                       gold_train_labels.long(), other, ignore_index)
                         stats_all.append(stats_summary)
 
                     # remove ignored samples and their model outputs
                     ignore_samples = np.where(chosen_labels == ignore_index)
-                    chosen_labels = np.delete(chosen_labels, ignore_samples).to(device)
+                    chosen_labels = np.delete(chosen_labels, ignore_samples)
                     if len(chosen_labels) > 0:
                         outputs = model(batch)
                         remove_mask = np.zeros([len(outputs)])
@@ -187,10 +185,10 @@ class LogRegModelWithAGRA(BaseTorchClassModel):
                             break
 
                         history[step] = {
-                            'loss'              : loss.item(),
-                            f'val_{metric}'     : metric_value,
+                            'loss': loss.item(),
+                            f'val_{metric}': metric_value,
                             f'best_val_{metric}': self.best_metric_value,
-                            'best_step'         : self.best_step,
+                            'best_step': self.best_step,
                         }
                         last_step_log.update(history[step])
 
@@ -203,7 +201,7 @@ class LogRegModelWithAGRA(BaseTorchClassModel):
 
             if stats is True:
                 # plot statistics up to best step
-                stats_all = stats_all[:(self.best_step-1)]
+                stats_all = stats_all[:(self.best_step - 1)]
                 make_plots_gold(stats_all, smoothing_length=10, other=other, storing_loc=storing_loc)
 
         except KeyboardInterrupt:

@@ -5,8 +5,8 @@ import numpy as np
 import torch
 from torch import Tensor
 
-from experiments.agra.utils import AGRAImageDataSet, load_image_dataset
-from experiments.utils import define_data_encoding, define_eval_metric, get_mv_train_labels, get_cifar_data, \
+from experiments.agra.utils import AGRAImageDataSet, load_image_dataset, define_data_encoding_agra
+from experiments.utils import define_eval_metric, get_mv_train_labels, get_cifar_data, \
     load_train_labels_from_file
 from src.AGRA.logreg_model_with_AGRA import LogRegModelWithAGRA
 from src.utils import set_seed, compute_weights
@@ -21,8 +21,8 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 
 
 def load_train_data_for_agra(
-        dataset, data_path, train_labels_path: str = None, num_valid_samples: int = None, encoding: str = "resnet50",
-        finetuning: bool =False, finetuning_epochs : int = 2
+        dataset, data_path, train_labels_path: str = None, num_valid_samples: int = None, enc_model: str = "resnet50",
+        finetuning: bool = False, finetuning_epochs: int = 2
 ):
     if dataset in ['youtube', 'sms', 'trec', 'yoruba', 'hausa']:
         # load wrench dataset
@@ -34,23 +34,23 @@ def load_train_data_for_agra(
         train_data.labels = y_train
 
     elif dataset in ['cifar', 'chexpert']:
-        # assert that the label file is also provided
-        assert train_labels_path is not None
 
         # load datasets
         train_data, test_data, valid_data, y_valid, y_test = get_cifar_data(
             os.path.join(data_path, dataset), num_valid_samples)
 
-        # load Cifar and CheXpert datasets and get encodings with resnet-50
-        train_features, valid_features, test_features = load_image_dataset(
-            data_path, dataset, train_data, test_data, valid_data, encoding, finetuning=finetuning,
-            finetuning_epochs=finetuning_epochs
-        )
-
         # upload the labels from the file
-        assert train_labels_path is not None
         train_labels_dict = load_train_labels_from_file(dataset_path, train_labels_path, dataset)
         y_train = np.array(list(train_labels_dict.values()))
+
+        # calculate num_classes
+        num_classes = max(int(max(y_train)), int(max(y_valid)), int(max(y_test))) + 1
+
+        # load Cifar and CheXpert datasets and get encodings with resnet-50
+        train_features, valid_features, test_features = load_image_dataset(
+            data_path, dataset, train_data, test_data, valid_data, enc_model, num_classes=num_classes,
+            finetuning=finetuning, finetuning_epochs=finetuning_epochs
+        )
 
         # transform the data into wrench-compatible datasets
         train_data = AGRAImageDataSet(Tensor(train_features), Tensor(y_train))
@@ -81,7 +81,7 @@ if __name__ == '__main__':
     parser.add_argument("--other", type=int, default=None)
     parser.add_argument("--closs", type=str, default='CE', choices=['CE', 'F1'])
     parser.add_argument("--weights", type=str, default='False', choices=['True', 'False'])
-    parser.add_argument('--save', action='store_true')
+    parser.add_argument('--save', type=bool, default=True)
     args = parser.parse_args()
 
     # set the seed
@@ -89,7 +89,7 @@ if __name__ == '__main__':
         set_seed(args.seed)
 
     # define the way how the dataset will be encoded
-    encoding = define_data_encoding(args)
+    encoding = define_data_encoding_agra(args)
 
     # define the path from which the dataset will be loaded
     dataset_path = args.data_path if args.data_path else \
