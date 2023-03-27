@@ -37,22 +37,38 @@ def define_eval_metric(dataset):
         raise ValueError('Dataset not available.')
 
 
-def get_cifar_data(dataset_path, num_valid_samples):
+def get_cifar_data(dataset_path, num_valid_samples, transformation = "standard"):
     train_path = os.path.join(dataset_path, 'train')
     test_path = os.path.join(dataset_path, 'test')
     valid_path = os.path.join(dataset_path, 'valid')
 
-    transform_train = transforms.Compose([
-        transforms.RandomCrop(32, padding=4),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-    ])
+    if transformation == "cleanlab":
+        transform_train = transforms.Compose([
+            transforms.RandomCrop(32, padding=4),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ])
 
-    transform_test = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-    ])
+        transform_test = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ])
+    elif transformation == "standard":
+        transform_train = transforms.Compose([
+            transforms.CenterCrop(224),
+            transforms.Resize(256),
+            transforms.ToTensor(),
+            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+        ])
+        transform_test = transforms.Compose([
+            transforms.CenterCrop(224),
+            transforms.Resize(256),
+            transforms.ToTensor(),
+            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+        ])
+    else:
+        raise ValueError(f"Unsupported transformation {transformation}")
 
     train_data = datasets.ImageFolder(train_path, transform_train)
     test_data = datasets.ImageFolder(test_path, transform_test)
