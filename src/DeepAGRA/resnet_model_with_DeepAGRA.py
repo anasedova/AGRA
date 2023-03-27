@@ -12,8 +12,8 @@ from torchvision.datasets import ImageFolder
 from tqdm.auto import trange
 from transformers import AdamW, get_linear_schedule_with_warmup
 
-from src.DeepAGRA.labels_recalculation_last_layer import calculate_label
 from src.eval_plots import make_plots_gold
+from src.labels_recalculation import calculate_label
 from src.utils import get_loss
 from wrench.basemodel import BaseTorchClassModel
 from wrench.dataset import BaseDataset

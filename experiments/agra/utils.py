@@ -58,7 +58,6 @@ def get_resnet_embedding(
     """
     https://www.activeloop.ai/resources/generate-image-embeddings-using-a-pre-trained-cnn-and-store-them-in-hub/
     https://becominghuman.ai/extract-a-feature-vector-for-any-image-with-pytorch-9717561d1d4c
-    # todo: is resnet_model.eval() really required here? = no dropout layers are active
     """
     out_embeddings = []
 
@@ -72,12 +71,12 @@ def get_resnet_embedding(
         raise ValueError(f"The encoding {encoding} is not yet supported.")
 
     if finetuning:
-        model = train_resnet(model, train_loader, epochs)
+        model = finetune_resnet(model, train_loader, epochs)
 
     layer = model._modules.get('avgpool')
     layer.register_forward_hook(copy_embedding)
 
-    model.eval()
+    model.eval()            # no dropout layers are active
     for X, y in train_loader:
         model(X)
     embeddings = [item for sublist in out_embeddings for item in sublist]
@@ -88,7 +87,8 @@ def get_resnet_embedding(
     return embeddings
 
 
-def train_resnet(model, loader, epochs=2, lr=1e-3, l2=0.0):
+def finetune_resnet(model, loader, epochs=2, lr=1e-3, l2=0.0):
+    """ Fine-tune the pretrained model (e.g. ResNet) before extracting the embeddings """
     criterion = torch.nn.CrossEntropyLoss(reduction='mean')
     optimizer = AdamW(model.parameters(), lr=lr, weight_decay=l2)
     model.train()
