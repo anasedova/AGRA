@@ -25,6 +25,7 @@ def prepare_data(dataset, dataset_type, path_to_data, extractor, model_name=None
 
     # check which samples are mislabeled
     X_train = train_data.features
+
     gold_labels_train = train_data.labels
     mislabeled = np.where(hard_labels_train != gold_labels_train, 1, 0)
     noise_rate = sum(mislabeled) / len(mislabeled)
@@ -55,3 +56,39 @@ def compute_sample_weights(train_labels):
         weights[train_labels == label] = 1 / counts[label]
 
     return weights
+
+def prepare_data_bert(dataset, path_to_data):
+    """
+    dataset: name of dataset, e.g. "sms", "youtube", ...
+    path_to_data: storing location of the WRENCH datasets folder
+    extractor: "tfidf" or "bert"
+    return: X_train, y_train, X_dev, y_dev, X_test, y_test
+    """
+
+    train_data, valid_data, test_data = load_dataset(
+        path_to_data,
+        dataset,
+        dataset_type='TextDataset',
+        extract_feature=False
+    )
+
+    # get the labels by majority voting for train data
+    label_model = MajorityVoting()
+    label_model.fit(dataset_train=train_data)
+    soft_labels_train = label_model.predict_proba(train_data)
+    y_train = probs_to_preds(soft_labels_train)
+
+    # compute noise rate
+    y_train_gold = train_data.labels
+    mislabeled = len(np.where(y_train != y_train_gold)[0])
+    noise_rate = len(np.where(y_train != y_train_gold)[0])
+    print('Noise rate:', mislabeled / len(y_train))
+
+    # weights for class-weighted sampling
+    weights = compute_sample_weights(y_train)
+
+    return train_data, train_data.labels, valid_data, np.array(valid_data.labels), test_data, \
+           np.array(test_data.labels), np.array(y_train_gold), np.array(mislabeled), weights, noise_rate
+
+
+

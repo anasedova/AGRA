@@ -12,6 +12,8 @@ from sklearn import preprocessing
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn.preprocessing import LabelEncoder
 from torch.utils.data import Dataset, TensorDataset
+from src.single_label.logistic_regression import MaxEntNetwork
+from src.single_label.bert_classifier import BertTextClassifier
 
 logger = logging.getLogger(__name__)
 
@@ -413,3 +415,14 @@ def load_model(model: str):
         return "bert-base-multilingual-cased"
     else:
         raise ValueError("Check the model name")
+
+def get_bert_model(dataset: str, output_classes: int):
+
+    if dataset in ['yoruba', 'hausa']:
+        model_name_bert = 'bert-base-multilingual-cased'
+    else:
+        model_name_bert = 'roberta-base'
+
+    net = BertTextClassifier(n_class=output_classes, model_name=model_name_bert)
+
+    return net, model_name_bert
