@@ -18,7 +18,7 @@ epochs = 10  # number of epochs
 ignore_index = -100  # class index assigned to ignored samples
 
 # hyper-parameters for grid search
-batch_sizes = [512]
+batch_sizes = [32, 128, 512]
 learning_rates = np.logspace(-5, -1, num=5, base=10)
 weight_decay = np.logspace(-5, -1, num=5, base=10)
 thresholds = [0.05, 0.01, 0.001]
