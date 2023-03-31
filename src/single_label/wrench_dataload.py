@@ -2,8 +2,8 @@
 import numpy as np
 
 from snorkel.utils import probs_to_preds
-from wrench.wrench.labelmodel.majority_voting import MajorityVoting
-from wrench.wrench.dataset import load_dataset
+from wrench.labelmodel.majority_voting import MajorityVoting
+from wrench.dataset import load_dataset
 
 
 def prepare_data(dataset, dataset_type, path_to_data, extractor, model_name=None):
