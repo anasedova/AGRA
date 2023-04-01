@@ -80,6 +80,8 @@ def prepare_data_bert(dataset, path_to_data):
 
     # compute noise rate
     y_train_gold = train_data.labels
+    mislabeled_vec = np.zeros(len(y_train))
+    mislabeled_vec[np.where(y_train != y_train_gold)[0]] = 1
     mislabeled = len(np.where(y_train != y_train_gold)[0])
     noise_rate = len(np.where(y_train != y_train_gold)[0])
     print('Noise rate:', mislabeled / len(y_train))
@@ -88,7 +90,7 @@ def prepare_data_bert(dataset, path_to_data):
     weights = compute_sample_weights(y_train)
 
     return train_data, train_data.labels, valid_data, np.array(valid_data.labels), test_data, \
-           np.array(test_data.labels), np.array(y_train_gold), np.array(mislabeled), weights, noise_rate
+           np.array(test_data.labels), np.array(y_train_gold), np.array(mislabeled_vec), weights, noise_rate
 
 
 

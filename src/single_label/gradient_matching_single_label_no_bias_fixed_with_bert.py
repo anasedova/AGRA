@@ -12,10 +12,10 @@ from wrench.utils import get_bert_torch_dataset_class, construct_collate_fn_trun
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from src.single_label.eval import (
-    collect_statistics, make_plots, make_plots_legend, make_plots_gold_legend, eval_grad_match, eval_gold,
+    collect_statistics, make_plots, make_plots_legend, make_plots_gold_legend, eval_grad_match_bert, eval_gold,
     make_plots_gold
 )
-from src.single_label.labels_recalculation_no_bias_fixed import calculate_label, F1Loss
+from src.single_label.labels_recalculation_bert import calculate_label, F1Loss
 from src.single_label.utils import get_bert_model, set_seed
 from transformers import AutoTokenizer
 from src.single_label.bert_classifier import BertTextClassifier
@@ -55,7 +55,8 @@ def train_grad_match_with_gold(
         storing_loc_plot_train: str = None,
         storing_loc_plot_legend: str = None,
         storing_loc_plot_gold: str = None,
-        storing_loc_plot_gold_legend: str = None
+        storing_loc_plot_gold_legend: str = None,
+        device: str = 'cpu'
 ):
 
     # empty dictionary for epoch times
@@ -78,6 +79,7 @@ def train_grad_match_with_gold(
 
     # initialize the neural network
     net, model_name = get_bert_model(dataset=dataset, output_classes=output_classes)
+    net = net.to(device)
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     torch_dataset = get_bert_torch_dataset_class(train_data)(train_data, tokenizer, 512)
@@ -85,7 +87,8 @@ def train_grad_match_with_gold(
     train_dataloader_ds_with_subs = DataLoader(torch_dataset, batch_size=batch_size, shuffle=True,
                                   collate_fn=collate_fn)
 
-    # todo: continue adaption here (and correct mistakes above)
+    train_y_ds = torch.tensor(train_y_ds).to(device)
+
 
     # initialize criterion for the update
     if training_loss == "CE":
@@ -97,11 +100,9 @@ def train_grad_match_with_gold(
     # initialize criterion for comparison
     if comparison_loss == "CE":
         comparison_criterion = nn.CrossEntropyLoss(ignore_index=ignore_index)
-        loss_type = "mean" # for autograd
 
     elif comparison_loss == "F1":
         comparison_criterion = F1Loss(num_classes=output_classes, avg=metric_avg)
-        loss_type = "sum" # for autograd
 
     # initialize optimizer
     optimizer = optim.Adam(net.parameters(), lr=learning_rate, weight_decay=weight_decay)
@@ -123,41 +124,37 @@ def train_grad_match_with_gold(
         start = time.time()
 
         # sample a batch from the training set
-        for batch, (inputs_ds_with_sub, labels_ds_with_sub, gold_labels, mislabeled) in \
+        for batch_num, batch in \
                 enumerate(train_dataloader_ds_with_subs, start=1):
 
             steps += 1
 
+            batch_idx = batch['ids'].to(device)
+            target = train_y_ds[batch_idx]
+            gold = gold_labels[batch_idx.to('cpu')]
+            mis = mislabeled[batch_idx.to('cpu')]
+
             # sample batch from the comparison dataset
             # if no weights specified -> sample uniformly (all datapoints have the same weight)
             if sample_weights is None:
-                idx = list(WeightedRandomSampler(
+                comp_idx = list(WeightedRandomSampler(
                     np.ones(num_samples), num_samples=int(comp_batch_size), replacement=False)
                 )
 
             # if sample weights are specified use a weighted sampler
             else:
-                idx = list(WeightedRandomSampler(sample_weights, num_samples=int(comp_batch_size), replacement=False))
+                comp_idx = list(WeightedRandomSampler(sample_weights, num_samples=int(comp_batch_size), replacement=False))
 
             # establish a dataloader and retrieve the comparison batch from it
-            train_dataloader_orig = DataLoader(
-                torch.utils.data.Subset(train_data, idx), batch_size=int(comp_batch_size)
-            )
-            (inputs_ds_orig, labels_ds_orig, _, _) = next(iter(train_dataloader_orig))
+            comp_dataset = torch.utils.data.Subset(torch_dataset, comp_idx)
+            comp_batch = next(iter(DataLoader(comp_dataset, batch_size=len(comp_idx), collate_fn=collate_fn)))
+            weak_comp_labels = train_y_ds[comp_idx].long()
 
             # choose a label for each datapoint in batch (ws label, other_class or ignore)
-            chosen_labels = calculate_label(
-                inputs_ds_with_sub,
-                labels_ds_with_sub,
-                inputs_ds_orig,
-                labels_ds_orig,
-                copy.deepcopy(net),
-                criterion,
-                comparison_criterion,
-                ignore_index=ignore_index,
-                other_class=other_class,
-                threshold=threshold
-            )
+            chosen_labels = calculate_label(batch, target, comp_batch, weak_comp_labels,
+                                            copy.deepcopy(net), criterion, comparison_criterion,
+                                            other_class=other_class, threshold=threshold,
+                                            ignore_index=ignore_index, device=device)
 
             # collect statistics for the current batch
             if other_class is not None:
@@ -171,7 +168,7 @@ def train_grad_match_with_gold(
 
             # norel_kept_batch, norel_ignored_batch, ds_kept_batch, ds_to_norel_batch, ds_ignored_batch
             stats = collect_statistics(
-                inputs_ds_with_sub.shape[0], ignore_index, chosen_labels, labels_ds_with_sub,
+                target.shape[0], ignore_index, chosen_labels, target,
                 no_relation_index=grouping
             )
 
@@ -180,7 +177,7 @@ def train_grad_match_with_gold(
             # correctly_kept_ds, correctly_kept_other, falsely_kept_ds, falsely_kept_other, correctly_corrected,
             # falsely_corrected
             stats_gold = eval_gold(
-                chosen_labels, labels_ds_with_sub, gold_labels, mislabeled, ignore_index, other_class
+                chosen_labels, target, gold, mis, ignore_index, other_class
             )
 
             # assert if numbers of gold comparison align with statistics
@@ -201,12 +198,12 @@ def train_grad_match_with_gold(
 
             # remove ignored samples
             ignore_samples = np.where(chosen_labels == ignore_index)
-            chosen_labels = np.delete(chosen_labels, ignore_samples)
+            chosen_labels = np.delete(chosen_labels, ignore_samples).to(device)
 
             # Finally do optimization with DS data and chosen labels
             optimizer.zero_grad()
 
-            output_ds = net(inputs_ds_with_sub)
+            output_ds = net(batch)
 
             # remove outputs for ignored samples -> make sure they are not used for updating
             remove_mask = np.zeros([len(output_ds)])
@@ -246,7 +243,7 @@ def train_grad_match_with_gold(
         epoch_times[epoch] = time.time() - start
 
         # evaluate the model on the dev set
-        accuracy, f1, _, _ = eval_grad_match(dev_X, dev_y, net, avg=crit)
+        accuracy, f1, _, _ = eval_grad_match_bert(dev_data, dev_y, net, avg=crit, device=device, tokenizer=tokenizer)
 
         # record the best performance and in which epoch it was achieved
         if accuracy >= best_accuracy:
@@ -264,7 +261,7 @@ def train_grad_match_with_gold(
         # logger.info(f"Epoch {str(epoch + 1)}, took: {str(end - start)}")
 
     # if evaluation metric is F1 -> choose best epoch accordingly
-    net_AGRA = get_model(model, dataset, num_features, output_classes)
+    net_AGRA, model_name = get_bert_model(dataset=dataset, output_classes=output_classes)
 
     if metric == "F1":
         chosen_epoch = best_epoch_f1
@@ -382,11 +379,11 @@ def train_grad_match_with_gold(
     # logger.info(f"Best Epoch Accuracy: {best_epoch_accuracy}")
 
     # evaluate the model on the dev set
-    accuracy, f1, precision, recall = eval_grad_match(dev_X, dev_y, net_AGRA, avg=crit)
+    accuracy, f1, precision, recall = eval_grad_match_bert(dev_data, dev_y, net_AGRA, avg=crit, tokenizer=tokenizer, device=device)
 
     # evaluate the model on the test set
-    accuracy_test, f1_test, precision_test, recall_test, test_predictions = eval_grad_match(
-        test_X, test_y, net_AGRA, avg=crit, return_preds=True
+    accuracy_test, f1_test, precision_test, recall_test, test_predictions = eval_grad_match_bert(
+        test_data, test_y, net_AGRA, avg=crit, return_preds=True, tokenizer=tokenizer, device=device
     )
 
     # print performance

@@ -4,9 +4,11 @@ import numpy as np
 import torch
 from sklearn.metrics import classification_report
 from src.single_label.utils import AGRADataset
+from wrench.utils import get_bert_torch_dataset_class, construct_collate_fn_trunc_pad
+from torch.utils.data import DataLoader
 
 logger = logging.getLogger(__name__)
-
+collate_fn = construct_collate_fn_trunc_pad('mask')
 
 def eval_grad_match(dev_X, dev_y, net, avg="macro", return_preds=False):
     dev_ds = AGRADataset(dev_X, dev_y)
@@ -31,6 +33,40 @@ def eval_grad_match(dev_X, dev_y, net, avg="macro", return_preds=False):
         else:
             return metrics["accuracy"], metrics['1']['f1-score'], metrics['1']['precision'], metrics['1'][
                 'recall'], dev_predictions
+
+def eval_grad_match_bert(dev_data, dev_y, net, tokenizer, avg="macro", return_preds=False, device='cpu'):
+    torch_dataset = get_bert_torch_dataset_class(dev_data)(dev_data, tokenizer, 512)
+
+    valid_dataloader = DataLoader(torch_dataset, batch_size=32, shuffle=True,
+                                               collate_fn=collate_fn)
+    net.eval()
+    probas = []
+    for batch in valid_dataloader:
+        output = net(batch['features'].to(device))
+        output = torch.sigmoid(output)
+        probas.append(output.cpu().detach().numpy())
+
+    dev_predictions = torch.argmax(np.vstack(probas), dim=1)
+
+    metrics = classification_report(y_true=dev_y, y_pred=dev_predictions.detach().numpy(), output_dict=True)
+
+    net.train()
+
+    if avg == "macro":
+        if return_preds is False:
+            return metrics["accuracy"], metrics['macro avg']['f1-score'], metrics['macro avg']['precision'], \
+                   metrics['macro avg']['recall']
+        else:
+            return metrics["accuracy"], metrics['macro avg']['f1-score'], metrics['macro avg']['precision'], \
+                   metrics['macro avg']['recall'], dev_predictions
+
+    elif avg == "binary":
+        if return_preds is False:
+            return metrics["accuracy"], metrics['1']['f1-score'], metrics['1']['precision'], metrics['1']['recall']
+        else:
+            return metrics["accuracy"], metrics['1']['f1-score'], metrics['1']['precision'], metrics['1'][
+                'recall'], dev_predictions
+
 
 
 def collect_statistics(
