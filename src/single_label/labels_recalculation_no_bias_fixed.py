@@ -26,6 +26,7 @@ def calculate_label(
         other_class: int = None,
         threshold: int = 0,
         device: str = 'cpu',
+        loss_type = 'mean'
 ) -> Tuple[np.ndarray, np.ndarray]:
 
     """
@@ -69,7 +70,21 @@ def calculate_label(
         loss_ds.backward(retain_graph=True)
 
         # compute per-sample gradients
-        autograd_hacks.compute_grad1(model)
+        autograd_hacks.compute_grad1(model, loss_type=loss_type)
+
+        for param in model.parameters():
+
+            if loss_type == "mean":
+                if torch.allclose(param.grad1.mean(dim=0), param.grad, atol=1e-06) is False:
+                    logger.info(f"{param.grad1.mean(dim=0)}, {param.grad}")
+
+                assert (torch.allclose(param.grad1.mean(dim=0), param.grad, atol=1e-06))
+
+            if loss_type == "sum":
+                if torch.allclose(param.grad1.sum(dim=0), param.grad, atol=1e-06) is False:
+                    logger.info(f"{param.grad1.mean(dim=0)}, {param.grad}")
+
+                assert (torch.allclose(param.grad1.sum(dim=0), param.grad, atol=1e-06))
 
         grads_ds_all = [params.grad1.detach().clone().cpu().numpy() for params in model.parameters() if params.requires_grad and len(params) > 0]
 
