@@ -93,11 +93,11 @@ def train_grad_match_with_gold(
     # initialize criterion for comparison
     if comparison_loss == "CE":
         comparison_criterion = nn.CrossEntropyLoss(ignore_index=ignore_index)
-        loss_type = "mean" # for autograd
+        loss_type = 'mean'
 
     elif comparison_loss == "F1":
         comparison_criterion = F1Loss(num_classes=output_classes, avg=metric_avg)
-        loss_type = "sum" # for autograd
+        loss_type = 'sum'
 
     # initialize optimizer
     optimizer = optim.Adam(net.parameters(), lr=learning_rate, weight_decay=weight_decay)
@@ -152,7 +152,8 @@ def train_grad_match_with_gold(
                 comparison_criterion,
                 ignore_index=ignore_index,
                 other_class=other_class,
-                threshold=threshold
+                threshold=threshold,
+                loss_type=loss_type
             )
 
             # collect statistics for the current batch
@@ -219,24 +220,12 @@ def train_grad_match_with_gold(
 
                 running_loss += loss.item()
                 loss.backward()
-
                 optimizer.step()
 
             # if all samples ignored -> don't update, reduce number of steps trained by 1
             # (so that averaging is not affected)
             else:
                 steps -= 1
-
-            # print the average loss every few batches
-            # if batch % 10 == 0:
-            #     if steps > 0:
-            #         logger.info(f"[{epoch + 1}, {batch}] loss: {running_loss / steps:.3f}")
-            #     else:
-            #         logger.info("No updates made")
-            #
-            #     # reset running loss and steps
-            #     running_loss = 0.0
-            #     steps = 0
 
         # record epoch time
         epoch_times[epoch] = time.time() - start
@@ -254,10 +243,6 @@ def train_grad_match_with_gold(
             best_f1 = f1
             best_epoch_f1 = epoch + 1
             best_model_state_f1 = copy.deepcopy(net.state_dict())
-
-        # end = time.time()
-
-        # logger.info(f"Epoch {str(epoch + 1)}, took: {str(end - start)}")
 
     # if evaluation metric is F1 -> choose best epoch accordingly
     net_AGRA = MaxEntNetwork(num_features, output_classes)
@@ -287,7 +272,6 @@ def train_grad_match_with_gold(
 
     # compare label changes to gold labels
     if other_class is None:
-
         correctly_ignored, falsely_ignored, correctly_kept, falsely_kept = [sum(x) for x in zip(*statistics_gold)]
 
         # compute fraction of mislabeled samples that were ignored
