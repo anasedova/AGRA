@@ -1,21 +1,18 @@
 import argparse
 import itertools
+import logging
 import os
 import statistics
-import logging
 
 import numpy as np
 import torch
 from scipy import stats
-from torch import Tensor
 
-from experiments.agra.utils import AGRAImageDataSet, load_image_dataset, define_data_encoding_agra
-from experiments.utils import define_eval_metric, get_mv_train_labels, get_cifar_data, \
-    load_train_labels_from_file
+from experiments.agra.utils import define_data_encoding_agra, \
+    load_train_data_for_agra
+from experiments.utils import define_eval_metric
 from src.AGRA.logreg_model_with_AGRA import LogRegModelWithAGRA
 from src.utils import set_seed, compute_weights
-from wrench.dataset import load_dataset, BaseDataset
-
 
 logger = logging.getLogger(__name__)
 
@@ -35,49 +32,6 @@ num_final_exp = 5
 
 # set the device
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-
-
-def load_train_data_for_agra(
-        dataset, data_path, train_labels_path: str = None, num_valid_samples: int = None, finetuning_batch_size: int = 32,
-        enc_model: str = "resnet50", finetuning: bool = False, finetuning_epochs: int = 2, metric: str = "acc"
-):
-    if dataset in ['youtube', 'sms', 'trec', 'yoruba', 'hausa']:
-        # load wrench dataset
-        train_data, test_data, valid_data = load_dataset(
-            data_path, dataset, dataset_type='TextDataset', extract_fn="tfidf", extract_feature=True
-        )
-        # calculate train labels y_train with majority vote
-        train_labels = get_mv_train_labels(train_data)
-        train_data.labels = train_labels
-
-    elif dataset in ['cifar', 'chexpert']:
-
-        # load datasets
-        train_data, test_data, valid_data, y_valid, y_test = get_cifar_data(
-            os.path.join(data_path, dataset), num_valid_samples)
-
-        # upload the labels from the file
-        train_labels_dict = load_train_labels_from_file(data_path, train_labels_path, dataset)
-        y_train = np.array(list(train_labels_dict.values()))
-
-        num_classes = max(int(max(y_train)), int(max(y_valid)), int(max(y_test))) + 1
-
-        # load Cifar and CheXpert datasets and get encodings with resnet-50
-        train_features, train_labels, valid_features, valid_labels, test_features, test_labels = load_image_dataset(
-            data_path, dataset, train_data, test_data, valid_data, enc_model,
-            num_classes=num_classes, finetuning=finetuning, finetuning_epochs=finetuning_epochs, metric=metric,
-            batch_size=finetuning_batch_size
-        )
-
-        # transform the data into wrench-compatible datasets
-        train_data = AGRAImageDataSet(Tensor(train_features), Tensor(train_labels))
-        valid_data = AGRAImageDataSet(Tensor(valid_features), Tensor(valid_labels))
-        test_data = AGRAImageDataSet(Tensor(test_features), Tensor(test_labels))
-
-    else:
-        raise ValueError(f"Dataset {dataset} is not yet supported.")
-
-    return train_data, valid_data, test_data, train_labels
 
 
 if __name__ == '__main__':
