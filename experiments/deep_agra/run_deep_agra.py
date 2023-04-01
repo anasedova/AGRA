@@ -2,6 +2,7 @@ import argparse
 import os
 import numpy as np
 import torch
+from torch.utils.data import DataLoader
 
 from experiments.deep_agra.utils import define_model_name
 from experiments.utils import get_cifar_data, get_mv_train_labels, load_train_labels_from_file, define_eval_metric
@@ -75,7 +76,9 @@ if __name__ == '__main__':
     parser.add_argument("--closs", type=str, default='CE', choices=['CE', 'F1'])
     parser.add_argument("--weights", type=str, default='False', choices=['True', 'False'])
     parser.add_argument('--save', type=bool, default=True)
+
     args = parser.parse_args()
+    args.weights = True if args.weights == "True" else False
 
     # set the seed
     if args.seed is not None:
@@ -92,7 +95,7 @@ if __name__ == '__main__':
     results_folder = os.path.join(args.output_path, "results", 'single_run', 'deep_agra', args.dataset,
                                   f'model_{args.model}_weights_{args.weights}_comp_{args.closs}_other_{str(args.other)}')
     os.makedirs(results_folder, exist_ok=True)
-    output_file = open(os.path.join(results_folder, "test_performance.txt"), "w")
+    output_file = open(os.path.join(results_folder, "result.txt"), "w")
 
     # define metric for the evaluation
     metric = define_eval_metric(args.dataset)
@@ -103,7 +106,7 @@ if __name__ == '__main__':
     )
 
     # compute weights for comparison batch sampling
-    agra_weights = compute_weights(train_labels) if args.weights == 'True' else None
+    agra_weights = compute_weights(train_labels) if args.weights else None
 
     # initialize model
     if args.model == 'bert':
@@ -139,8 +142,8 @@ if __name__ == '__main__':
         evaluation_step=300,
         verbose=True
     )
-    metric_value = model.test(test_data, metric)
-    print(metric_value)
+    metric_value = model.test(DataLoader(test_data))
+    print(f"Test {metric} value: {metric_value}")
 
     if args.save is True:
         output_file.write("\t".join(["model", args.model]) + "\n")
@@ -150,4 +153,4 @@ if __name__ == '__main__':
         output_file.write("\t".join(["lr", str(lr)]) + "\n")
         output_file.write("\t".join(["batch_size", str(batch_size)]) + "\n")
         output_file.write("\t".join(["agra_threshold", str(agra_threshold)]) + "\n")
-        output_file.write("\t".join([metric, str(metric)]) + "\n")
+        output_file.write("\t".join([metric, str(metric_value)]) + "\n")

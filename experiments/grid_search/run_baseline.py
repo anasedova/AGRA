@@ -8,7 +8,7 @@ import joblib
 import numpy as np
 from snorkel.utils import probs_to_preds
 
-from _scr.utils import set_seed
+from src.utils import set_seed
 from gridsearch import grid_search
 from wrench.dataset import load_dataset
 from wrench.endmodel.bert_model import BertClassifierModel

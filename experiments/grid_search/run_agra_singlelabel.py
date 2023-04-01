@@ -8,9 +8,9 @@ import joblib
 import numpy as np
 from snorkel.utils import probs_to_preds
 
-from _scr.AGRA.logreg_model_with_AGRA import LogRegModelWithAGRA
-from _scr.DeepAGRA.bert_model_with_AGRA import BertClassifierModelWithAGRA
-from _scr.utils import set_seed, compute_weights
+from src.AGRA.logreg_model_with_AGRA import LogRegModelWithAGRA
+from src.DeepAGRA.bert_model_with_DeepAGRA import BertClassifierModelWithAGRA
+from src.utils import set_seed, compute_weights
 from gridsearch import grid_search
 from wrench.dataset import load_dataset
 from wrench.evaluation import AverageMeter
@@ -19,7 +19,7 @@ from wrench.labelmodel.majority_voting import MajorityVoting
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--dataset_path", type=str, default=None)
+    parser.add_argument("--data_path", type=str, default=None)
     parser.add_argument("--dataset", type=str, default='youtube', choices=['spam', 'sms', 'trec', 'yoruba', 'hausa'])
     parser.add_argument("--other", type=int, default=None)
     parser.add_argument("--model", type=str, default='logreg', choices=['logreg', 'bert'])  # or roberta-base

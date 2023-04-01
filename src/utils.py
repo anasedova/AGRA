@@ -5,6 +5,9 @@ import random
 from src.f1loss import F1Loss
 
 
+device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+
+
 def set_seed(seed: int) -> None:
     """ Fix seed for all shuffle processes in order to get the reproducible result """
     random.seed(seed)
@@ -43,9 +46,9 @@ def compute_weights(train_labels) -> np.array:
 # get loss
 def get_loss(comp_loss: str, num_classes: int):
     if comp_loss == 'F1':
-        comp_loss = F1Loss(num_classes)
+        comp_loss = F1Loss(num_classes).to(device)
     else:
-        comp_loss = torch.nn.CrossEntropyLoss(reduction='mean')
+        comp_loss = torch.nn.CrossEntropyLoss(reduction='mean').to(device)
     return comp_loss
 
 

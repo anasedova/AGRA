@@ -258,7 +258,9 @@ class ResNetClassifierModelWithDeepAGRA(BaseTorchClassModel):
     #     del self.y_valid
 
     def test(self, dataloader, **kwargs):
+        print("Model testing...")
         predictions_list, label_list = [], []
+        self.model.eval()
         with torch.no_grad():
             for data, labels in dataloader:
                 output = self.model(data.to(self.device))

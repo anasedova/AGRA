@@ -1,4 +1,4 @@
-import json
+import copy
 import os
 import pickle
 from typing import List, Tuple, Any
@@ -7,17 +7,21 @@ import joblib
 import numpy as np
 import torch
 import torch.nn as nn
-from torch import Tensor
 import torchvision.models as models
+from torch import Tensor
 from torch.optim import AdamW
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
+
+from wrench.dataset import BaseDataset
+
+from wrench.evaluation import METRIC
 
 # set the device
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 
-class AGRAImageDataSet(TensorDataset):
+class AGRAImageDataSet(TensorDataset, BaseDataset):
     def __init__(self, *tensors: Tensor, **kwargs):
         super(TensorDataset, self).__init__(**kwargs)
         self.tensors = tensors
@@ -52,6 +56,9 @@ class AGRAImageDataSet(TensorDataset):
         self.examples = self.tensors[0]  # same as self.features
 
 
+    def extract_feature_(self, **kwargs):
+        pass
+
 def define_data_encoding_agra(args) -> str:
     # define the necessary encoding if not provided
     if args.encoding:
@@ -82,32 +89,74 @@ def get_resnet_embedding(train_loader: DataLoader, f_model: Any = None) -> np.nd
     layer.register_forward_hook(copy_embedding)
 
     f_model.eval()            # no dropout layers are active
+    all_labels = []
     for X, y in train_loader:
         X, y = X.to(device), y.to(device)
+        all_labels.append(y.cpu().detach().numpy())
         f_model(X)
     embeddings = [item for sublist in out_embeddings for item in sublist]
     embeddings = np.stack(embeddings, axis=0)
+    all_labels = np.concatenate(all_labels)
 
     # print(len(list_embeddings))           # 50000
     # print(np.array(list_embeddings[0]).shape)         # 2048
-    return embeddings
+    return embeddings, all_labels
 
 
-def finetune_resnet(f_model, loader, epochs=2, lr=1e-3, l2=0.0):
+def finetune_resnet(
+        f_model, train_loader, valid_loader, epochs=2, metric="acc", lr=1e-1, momentum=0.9, weight_decay=0.0005,
+        lr_decay=0.1
+):
     """ Fine-tune the pretrained model (e.g. ResNet) before extracting the embeddings """
+
+    assert metric in METRIC.keys()
+    metric_fn = METRIC[metric]
+
     criterion = torch.nn.CrossEntropyLoss(reduction='mean')
-    optimizer = AdamW(f_model.parameters(), lr=lr, weight_decay=l2)
+    # optimizer = AdamW(f_model.parameters(), lr=lr, weight_decay=weight_decay)
+    # optimizer = torch.optim.SGD(f_model.parameters(), lr=lr, weight_decay=weight_decay, momentum=momentum)    #  CORES
+    optimizer = AdamW(f_model.parameters(), lr=1e-3, weight_decay=0.0)            # the setting from 29.03
     f_model.train()
     optimizer.zero_grad()
+
+    best_metric, best_epoch = 0, 0
     for n_epoch, epoch in enumerate(range(epochs)):
-        print(f"Epoch {n_epoch}...")
-        for batch, labels in tqdm(loader):
+        print(f"Epoch {n_epoch + 1}/{epochs}...")
+        for batch, labels in tqdm(train_loader):
+            optimizer.zero_grad()
             batch, labels = batch.to(device), labels.to(device)
             output = f_model(batch)
             loss = criterion(output, labels)
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
+
+        f_model.eval()
+        # evaluate the model performance
+        predictions_list, label_list = [], []
+        with torch.no_grad():
+            for val_batch, val_labels in valid_loader:
+                val_batch, val_labels = val_batch.to(device), val_labels.to(device)
+                output = f_model(val_batch)
+                predictions = output.detach().cpu().numpy()
+                predictions_list.append(predictions)
+                label_list.append(val_labels.detach().cpu().numpy())
+        predictions = np.concatenate(predictions_list)
+        gold_labels = np.squeeze(np.hstack(label_list))
+        valid_metric = metric_fn(gold_labels, predictions)
+        print(f"Current validation {metric} is {valid_metric}")
+        f_model.train()
+
+        if valid_metric > best_metric:
+            best_metric = valid_metric
+            best_model = copy.deepcopy(f_model.state_dict())
+            best_epoch = n_epoch
+
+    # f_model.load_state_dict(best_model)
+    # print(f"The best metric {best_metric} was achieved at epoch {best_epoch}; "
+    #       f"this model was used to calculate the embeddings.")
+    print(f"The model was fine-tuned for {epochs} epochs. ")
+
     return f_model
 
 
@@ -140,19 +189,36 @@ def get_resnet_embedding_ver_2(train_loader):
 
 def load_image_dataset(
         data_path, dataset, train_data, test_data, valid_data, encoding: str = "resnet50", num_classes: int = None,
-        batch_size: int = 128, finetuning: bool = False, finetuning_epochs: int = 2
-) -> Tuple[List[List], List[List], List[List]]:
+        batch_size: int = 32, finetuning: bool = False, finetuning_epochs: int = 2, metric: str = "acc"
+):
     """ Load the train, valid and test sets for image dataset (currently: Cifar, CheXpert) """
 
-    set = f"_finetuned_epoch{finetuning_epochs}" if finetuning else ""
+    set = f"_finetuned_epoch{finetuning_epochs}_batchsize{batch_size}_old_setting" if finetuning else ""
     path_to_cache = os.path.join(data_path, dataset, f"encoded_{encoding}{set}")
+
     if os.path.exists(path_to_cache):
         train_embeddings = joblib.load(os.path.join(path_to_cache, f"train_embeddings_{encoding}.data"))
         valid_embeddings = joblib.load(os.path.join(path_to_cache, f"valid_embeddings_{encoding}.data"))
         test_embeddings = joblib.load(os.path.join(path_to_cache, f"test_embeddings_{encoding}.data"))
+
+        train_labels = joblib.load(os.path.join(path_to_cache, f"train_labels.data"))
+        valid_labels = joblib.load(os.path.join(path_to_cache, f"valid_labels.data"))
+        test_labels = joblib.load(os.path.join(path_to_cache, f"test_labels.data"))
+
+        if type(train_labels) is list:
+            train_labels = np.concatenate(train_labels)
+            assert train_labels.shape[0] == train_embeddings.shape[0]
+
+        if type(valid_labels) is list:
+            valid_labels = np.concatenate(valid_labels)
+            assert valid_labels.shape[0] == valid_embeddings.shape[0]
+
+        if type(test_labels) is list:
+            test_labels = np.concatenate(test_labels)
+            assert test_labels.shape[0] == test_embeddings.shape[0]
+
         print(f"Embeddings are loaded from {path_to_cache}")
     else:
-
         train_loader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=2)
         valid_loader = torch.utils.data.DataLoader(valid_data, batch_size=batch_size, shuffle=False, num_workers=2)
         test_loader = torch.utils.data.DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=2)
@@ -166,23 +232,29 @@ def load_image_dataset(
             f_model.fc = nn.Linear(f_model.fc.in_features, num_classes)
             f_model = f_model.to(device)
             print(f"FINE-TUNING \t {encoding} model \t epochs: {finetuning_epochs}")
-            f_model = finetune_resnet(f_model, train_loader, finetuning_epochs)
+            f_model = finetune_resnet(f_model, train_loader, valid_loader, epochs=finetuning_epochs, metric=metric)
 
-        train_embeddings = get_resnet_embedding(train_loader, f_model)
-        valid_embeddings = get_resnet_embedding(valid_loader, f_model)
-        test_embeddings = get_resnet_embedding(test_loader, f_model)
+        train_embeddings, train_labels = get_resnet_embedding(train_loader, f_model)
+        valid_embeddings, valid_labels = get_resnet_embedding(valid_loader, f_model)
+        test_embeddings, test_labels = get_resnet_embedding(test_loader, f_model)
 
         os.makedirs(path_to_cache, exist_ok=True)
         with open(os.path.join(path_to_cache, f"train_embeddings_{encoding}.data"), 'wb') as file:
             pickle.dump(train_embeddings, file)
+        with open(os.path.join(path_to_cache, f"train_labels.data"), 'wb') as file:
+            pickle.dump(train_labels, file)
 
         with open(os.path.join(path_to_cache, f"valid_embeddings_{encoding}.data"), 'wb') as file:
             pickle.dump(valid_embeddings, file)
+        with open(os.path.join(path_to_cache, f"valid_labels.data"), 'wb') as file:
+            pickle.dump(valid_labels, file)
 
         with open(os.path.join(path_to_cache, f"test_embeddings_{encoding}.data"), 'wb') as file:
             pickle.dump(test_embeddings, file)
+        with open(os.path.join(path_to_cache, f"test_labels.data"), 'wb') as file:
+            pickle.dump(test_labels, file)
 
         print(f"New embeddings are calculated and saved to {path_to_cache}")
 
-    return train_embeddings, valid_embeddings, test_embeddings
+    return train_embeddings, train_labels, valid_embeddings, valid_labels, test_embeddings, test_labels
 

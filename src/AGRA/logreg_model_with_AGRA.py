@@ -1,212 +1,167 @@
 #### adapted from https://github.com/JieyuZ2/wrench/blob/main/wrench/endmodel/linear_model.py
-import logging
-from typing import Any, Optional, Union, Callable, Dict
 
 import copy
+import logging
+import warnings
+from typing import Any, Optional, Union, Callable
+
 import numpy as np
 import torch
-from torch import optim
-from torch.utils.data import WeightedRandomSampler
+from sklearn.metrics import classification_report
+from torch import optim, nn
 from torch.utils.data import DataLoader
-from tqdm.auto import trange
-from transformers import get_linear_schedule_with_warmup
+from torch.utils.data import WeightedRandomSampler
 
 from src.AGRA.labels_recalculation_logreg import calculate_label
-from src.utils import get_statistics, get_loss
-from wrench.backbone import BackBone, LogReg
-from wrench.basemodel import BaseTorchClassModel
+from src.multi_label.logistic_regression import MaxEntNetwork
+from src.utils import get_loss
+from wrench.backbone import BackBone
 from wrench.dataset import BaseDataset, TorchDataset
-from wrench.utils import cross_entropy_with_probs
-# from _src.labels_recalculation_logreg import calculate_label
-from src.eval_plots import make_plots_gold
 
+device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+warnings.filterwarnings("ignore", category=UserWarning)         # ignore UserWarning
 logger = logging.getLogger(__name__)
 
 
-class LogRegModelWithAGRA(BaseTorchClassModel):
+class LogRegModelWithAGRA:
     def __init__(self,
-                 lr: Optional[float] = 1e-4,
-                 l2: Optional[float] = 0.0,
-                 batch_size: Optional[int] = 128,
-                 comp_batch_size: Optional[int] = None,
-                 comp_loss: str = "CE",
+                 num_classes: int,
+                 include_bias: bool = True,
+                 adaptive_threshold: bool = True,
                  other: int = None,
                  agra_threshold: float = 0,
                  agra_weights: torch.tensor = None,
-                 ignore_index: int = -100,
-                 stats: bool = False,
-                 storing_loc: str = None,
-                 test_batch_size: Optional[int] = 512,
-                 n_steps: Optional[int] = 100000,
-                 binary_mode: Optional[bool] = False
+                 ignore_index: int = -100
                  ):
         super().__init__()
-        self.hyperparas = {
-            'lr': lr,
-            'l2': l2,
-            'batch_size': batch_size,
-            'comp_batch_size': comp_batch_size,
-            'comp_loss': comp_loss,
-            'other': other,
-            'agra_threshold': agra_threshold,
-            'agra_weights': agra_weights,
-            'ignore_index': ignore_index,
-            'stats': stats,
-            'storing_loc': storing_loc,
-            'test_batch_size': test_batch_size,
-            'n_steps': n_steps,
-            'binary_mode': binary_mode,
-        }
+
+        self.other = other
+        self.ignore_index = ignore_index
+        self.agra_threshold = agra_threshold
+        self.agra_weights = agra_weights
+
+        self.include_bias = include_bias
+        self.adaptive_threshold = adaptive_threshold
+
+        self.num_classes = num_classes
         self.model: Optional[BackBone] = None
+        self.best_metric_value = 0
+        self.best_model_state = None
 
     def fit(self,
             dataset_train: BaseDataset,
             y_train: Optional[np.ndarray] = None,
             dataset_valid: Optional[BaseDataset] = None,
             y_valid: Optional[np.ndarray] = None,
-            evaluation_step: Optional[int] = 100,
+
+            lr: Optional[float] = 1e-4,
+            l2: Optional[float] = 0.0,
+            batch_size: Optional[int] = 32,
+            comp_loss: str = "CE",
+            num_epochs: int = 10,
+
+            comp_batch_size: int = None,
             metric: Optional[Union[str, Callable]] = 'acc',
-            direction: Optional[str] = 'auto',
-            patience: Optional[int] = 20,
             tolerance: Optional[float] = -1.0,
-            device: Optional[torch.device] = None,
             verbose: Optional[bool] = True,
-            **kwargs: Any) -> Dict:
+            **kwargs: Any):
 
         if not verbose:
             logger.setLevel(logging.ERROR)
 
-        self._update_hyperparas(**kwargs)
-        hyperparas = self.hyperparas
-
-        n_steps = hyperparas['n_steps']
-        train_dataloader = DataLoader(TorchDataset(dataset_train, n_data=n_steps * hyperparas['batch_size']),
-                                      batch_size=hyperparas['batch_size'], shuffle=True)
-
-        batch_size = hyperparas['batch_size']
-        comp_batch_size = hyperparas['comp_batch_size']
         if comp_batch_size is None:
             comp_batch_size = batch_size
-        comp_loss = hyperparas['comp_loss']
-        other = hyperparas['other']
-        agra_threshold = hyperparas['agra_threshold']
-        agra_weights = hyperparas['agra_weights']
-        ignore_index = hyperparas['ignore_index']
-        stats = hyperparas['stats']
-        storing_loc = hyperparas['storing_loc']
+
+        train_dataloader = DataLoader(TorchDataset(dataset_train), batch_size=batch_size, shuffle=True)
 
         if y_train is None:
             y_train = torch.Tensor(dataset_train.weak_labels)
         else:
             y_train = torch.Tensor(y_train)  # weak labels
-        y_gold = torch.Tensor(dataset_train.labels)  # gold labels
+        # y_gold = torch.Tensor(dataset_train.labels)  # gold labels
 
-        if agra_weights is None:
-            # agra_weights = np.ones(len(dataset_train))
-            agra_weights = np.ones(dataset_train.features.shape[0])
-        agra_weights = torch.FloatTensor(agra_weights)
-
-        # determine the number of classes
-        if other is not None:
-            num_classes = int(max(other, max(dataset_train.labels), max(dataset_valid.labels))) + 1
-        else:
-            num_classes = int(max(max(dataset_train.labels), max(dataset_valid.labels))) + 1
+        if self.agra_weights is None:
+            self.agra_weights = np.ones(dataset_train.features.shape[0])
+        self.agra_weights = torch.FloatTensor(self.agra_weights)
 
         input_size = dataset_train.features.shape[1]  # size of feature vector
 
-        # initialize comparison loss
-        comparison_criterion = get_loss(comp_loss, num_classes)
+        # initialize the model
+        self.model = MaxEntNetwork(input_size, self.num_classes).to(device)
 
-        model = LogReg(input_size=input_size, n_class=num_classes, binary_mode=hyperparas['binary_mode'])
-        self.model = model
+        # initialize loss & optimizer
+        comparison_criterion = get_loss(comp_loss, self.num_classes)
+        update_criterion = nn.CrossEntropyLoss(reduction="mean", ignore_index=self.ignore_index)
+        optimizer = optim.Adam(self.model.parameters(), lr=lr, weight_decay=l2)
 
-        optimizer = optim.Adam(model.parameters(), lr=hyperparas['lr'], weight_decay=hyperparas['l2'])
+        for epoch in range(num_epochs):
+            self.model.train()
+            for batch in train_dataloader:
+                optimizer.zero_grad()
 
-        # Set up the learning rate scheduler
-        scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=n_steps)
+                # retrieve the weak labels
+                train_samples = batch["ids"]
+                weak_train_labels = y_train[train_samples].long()
 
-        valid_flag = self._init_valid_step(dataset_valid, metric=metric)
+                # sample a comparison batch
+                idx = list(WeightedRandomSampler(self.agra_weights, num_samples=comp_batch_size, replacement=False))
+                comp_dataset = dataset_train.create_subset(idx)
+                comp_batch = next(iter(DataLoader(TorchDataset(comp_dataset), batch_size=len(idx))))
+                weak_comp_labels = y_train[idx].long()
 
-        history = {}
-        last_step_log = {}
-        stats_all = []
-        try:
-            with trange(n_steps, desc="[TRAIN] Linear Classifier", unit="steps", disable=not verbose, ncols=150,
-                        position=0, leave=True) as pbar:
-                model.train()
-                step = 0
-                for batch in train_dataloader:
-                    step += 1
-                    optimizer.zero_grad()
+                # calculate the labels that should be used for training
+                chosen_labels = calculate_label(batch, weak_train_labels, comp_batch, weak_comp_labels,
+                                                copy.deepcopy(self.model), comparison_criterion=comparison_criterion,
+                                                ignore_index=self.ignore_index, other_class=self.other,
+                                                threshold=self.agra_threshold,
+                                                include_bias=self.include_bias,
+                                                adaptive_threshold=self.adaptive_threshold)
 
-                    # retrieve the weak labels
-                    train_samples = batch["ids"]
-                    weak_train_labels = y_train[train_samples].long()
+                # remove ignored samples and their model outputs
+                ignore_samples = np.where(chosen_labels == self.ignore_index)
+                chosen_labels = np.delete(chosen_labels, ignore_samples)
+                chosen_labels = torch.Tensor(chosen_labels).to(device)
+                if len(chosen_labels) > 0:
+                    outputs = self.model(batch["features"].to(device))
+                    remove_mask = np.zeros([len(outputs)])
+                    remove_mask[ignore_samples] = 1
+                    outputs = outputs[remove_mask != 1]
 
-                    # sample a comparison batch
-                    idx = list(WeightedRandomSampler(agra_weights, num_samples=comp_batch_size, replacement=False))
-                    comp_dataset = dataset_train.create_subset(idx)
-                    comp_batch = next(iter(DataLoader(TorchDataset(comp_dataset), batch_size=len(idx))))
-                    weak_comp_labels = y_train[idx].long()
+                    # compute loss only with the selected examples
+                    loss = update_criterion(outputs, chosen_labels)
+                    loss.backward()
+                    optimizer.step()
 
-                    # calculate the labels that should be used for training
-                    chosen_labels = calculate_label(batch, weak_train_labels, comp_batch, weak_comp_labels,
-                                                    copy.deepcopy(model), comparison_criterion,
-                                                    other_class=other, threshold=agra_threshold,
-                                                    ignore_index=ignore_index)
+            _ = self.test(dataset_valid, batch_size, metric)
+            # print(f"Epoch {epoch} \t valid metric: {metric_value}")
 
-                    # compute statistics
-                    if stats is True:
-                        gold_train_labels = y_gold[train_samples]
-                        # correctly_removed, falsely_removed, falsely_kept, correctly_kept, correctly_corrected, falsely_corrected
-                        stats_summary = get_statistics(weak_train_labels.to('cpu'), chosen_labels,
-                                                       gold_train_labels.long(), other, ignore_index)
-                        stats_all.append(stats_summary)
+        # logger.info(f"The best metric: {self.best_metric_value}, the model state will be loaded...")
+        self.model.load_state_dict(self.best_model_state)
 
-                    # remove ignored samples and their model outputs
-                    ignore_samples = np.where(chosen_labels == ignore_index)
-                    chosen_labels = np.delete(chosen_labels, ignore_samples)
-                    if len(chosen_labels) > 0:
-                        outputs = model(batch)
-                        remove_mask = np.zeros([len(outputs)])
-                        remove_mask[ignore_samples] = 1
-                        outputs = outputs[remove_mask != 1]
+    def test(self, dataset_valid, batch_size, metric):
+        # validation
+        self.model.eval()
+        with torch.no_grad():
+            all_preds, all_labels = [], []
+            valid_dataloader = DataLoader(dataset_valid, batch_size=batch_size)
+            for batch, labels in valid_dataloader:
+                batch, labels = batch.to(device), labels.to(device)
+                preds = torch.argmax(self.model(batch), dim=1)
+                all_preds.append(preds.cpu().detach().numpy())
+                all_labels.append(labels.cpu().detach().numpy())
+            all_preds = np.concatenate(all_preds)
+            all_labels = np.concatenate(all_labels)
+            report = classification_report(y_true=all_labels, y_pred=all_preds, output_dict=True)
+            if metric == "acc":
+                metric_value = report["accuracy"]
+            elif metric == "f1":
+                metric_value = report["macro avg"]
+            else:
+                raise ValueError(f"Unknown metric {metric}")
 
-                        # compute loss only with the selected examples
-                        loss = cross_entropy_with_probs(outputs, chosen_labels, reduction='mean')
-                        loss.backward()
-                        optimizer.step()
-                        scheduler.step()
+            if metric_value > self.best_metric_value:
+                self.best_metric_value = metric_value
+                self.best_model_state = copy.deepcopy(self.model.state_dict())
+        self.model.train()
+        return metric_value
 
-                    if valid_flag and step % evaluation_step == 0:
-                        metric_value, early_stop_flag, info = self._valid_step(step, patience=patience)
-                        if early_stop_flag:
-                            logger.info(info)
-                            break
-
-                        history[step] = {
-                            'loss': loss.item(),
-                            f'val_{metric}': metric_value,
-                            f'best_val_{metric}': self.best_metric_value,
-                            'best_step': self.best_step,
-                        }
-                        last_step_log.update(history[step])
-
-                    last_step_log['loss'] = loss.item()
-                    pbar.update()
-                    pbar.set_postfix(ordered_dict=last_step_log)
-
-                    if step >= n_steps:
-                        break
-
-            if stats is True:
-                # plot statistics up to best step
-                stats_all = stats_all[:(self.best_step - 1)]
-                make_plots_gold(stats_all, smoothing_length=10, other=other, storing_loc=storing_loc)
-
-        except KeyboardInterrupt:
-            logger.info(f'KeyboardInterrupt! do not terminate the process in case need to save the best model')
-
-        self._finalize()
-
-        return history

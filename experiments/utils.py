@@ -2,12 +2,14 @@ import copy
 import json
 import os
 import pathlib
+from typing import Callable, Optional, Union
 
 import numpy as np
 import torch
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 
+from wrench.evaluation import METRIC
 from wrench.labelmodel.majority_voting import MajorityVoting
 from snorkel.utils import probs_to_preds
 
@@ -99,3 +101,8 @@ def load_train_labels_from_file(dataset_path, train_labels_path, dataset):
                 ] = value
         train_labels = updated_train_labels_dict
     return train_labels
+
+
+def define_metric(metric: Optional[Union[str, Callable]]) -> None:
+    # initialize metric
+    return metric if isinstance(metric, Callable) else METRIC[metric]
