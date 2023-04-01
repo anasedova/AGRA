@@ -28,7 +28,7 @@ weight_decay = np.logspace(-5, -1, num=5, base=10)
 num_grid_exp = 3
 # number of final experiments to be performed with the best parameter combination
 num_final_exp = 5
-
+set_seed(0)
 
 class AGRAExperiments:
 
@@ -75,7 +75,7 @@ class AGRAExperiments:
 
         # which averaging will be used for AGRA update (when we optimizing towards the F1 score)
         if metric_avg is None:  # default: binary if num_classes=2, macro otherwise
-            self.metric_avg = "binary" if max(self.gold_labels) == 1 else "macro"
+            self.metric_avg = "binary" if max(self.gold_labels) == 1 else "macro" # how F1 loss is computed
         else:
             self.metric_avg = metric_avg
 
@@ -255,6 +255,7 @@ if __name__ == '__main__':
     parser.add_argument('--extractor', default='tfidf', type=str)
     parser.add_argument('--train_loss', default=None, type=str)
     parser.add_argument('--comp_loss', default=None, type=str)
+    parser.add_argument('--model', default='logreg', type=str, choices=['logreg', 'bert'])
     parser.add_argument('--weights', default=None)
     parser.add_argument('--other', default=None)
     parser.add_argument('--seed', default=0)
@@ -263,11 +264,9 @@ if __name__ == '__main__':
 
     file_path = os.path.split(os.path.abspath(__file__))[0]
     path_to_data = os.path.join(os.path.split(os.path.abspath(__file__))[0], 'datasets')
-    output_path = os.path.join(file_path, 'results_no_bias_fixed')
+    output_path = os.path.join(file_path, 'results_no_bias_fixed_corrected')
 
     use_weights = True if args.weights == "True" else False
-    seed = int(args.seed) if args.seed else None
-    other = int(args.other) if args.other else None
 
     if args.dataset is None:
         datasets = ['youtube', 'sms', 'trec', 'yoruba', 'hausa']
@@ -291,6 +290,7 @@ if __name__ == '__main__':
 
                     use_weights = True if weights == "True" else False
 
+                    start_time = time.time()
                     exp = AGRAExperiments(
                         input_data_path=path_to_data,
                         dataset=dataset,
@@ -298,45 +298,15 @@ if __name__ == '__main__':
                         extractor=args.extractor,
                         model_name=None,
                         metric=metric,
-                        metric_avg=None,
+                        metric_avg=None, # todo: difference between crt and metric_avg
                         crit=None,
                         train_loss=train_loss,
                         comp_loss=comp_loss,
                         use_weights=use_weights,
-                        seed=seed,
-                        other=other
+                        seed=args.seed,
+                        other=args.other
                     )
                     exp.run_experiments()
-            else:
-                if args.train_loss is None:
-                    raise ValueError("You need to define train_loss!")
-                elif args.comp_loss is None:
-                        raise ValueError(
-                        "For AGRA experiment you need to define both train_loss and comp_loss (or define none of them, and all "
-                        "combinations will be tried)."
-                    )
-    else:
-        if args.dataset in ['youtube', 'trec']:
-            metric = 'acc'
-        else:
-            metric = 'F1'
-        start_time = time.time()
+                    end_time = time.time()
 
-        exp = AGRAExperiments(
-            input_data_path=path_to_data,
-            dataset=args.dataset,
-                    output_data_path=output_path,
-                    extractor=args.extractor,
-                    model_name=None,
-                    metric=metric,
-                    metric_avg=None,
-                    crit=None,
-                    train_loss=args.train_loss,
-                    comp_loss=args.comp_loss,
-                    use_weights=use_weights,
-                    seed=seed,
-                    other=other
-                )
-        exp.run_experiments()
-        end_time = time.time()
-        print('Time spent:', end_time-start_time)
+                    print('Time used for experiment:', end_time-start_time)
