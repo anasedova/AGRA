@@ -199,7 +199,7 @@ def load_train_data_for_agra(
         )
         # calculate train labels y_train with majority vote
         train_labels = get_mv_train_labels(train_data)
-        train_data.labels = train_labels
+        # train_data.labels = train_labels
 
     elif dataset in ['cifar', 'chexpert']:
 

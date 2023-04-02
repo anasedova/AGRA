@@ -9,11 +9,11 @@ from experiments.utils import define_eval_metric
 from src.AGRA.logreg_model_with_AGRA import LogRegModelWithAGRA
 from src.utils import set_seed, compute_weights
 
-lr = 1e-2
-weight_decay = 1e-2
-batch_size = 32
+lr = 0.1
+weight_decay = 0.00001
+batch_size = 512
 agra_threshold = 0
-num_epochs=10
+num_epochs = 10
 
 # set the device
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -24,20 +24,22 @@ if __name__ == '__main__':
     parser.add_argument("--data_path", type=str, default=None)
     parser.add_argument("--train_labels_path", type=str, default=None)
     parser.add_argument("--gold_label_path", type=str, default=None)
-    parser.add_argument("--output_path", type=str, default=None)
-    parser.add_argument("--dataset", type=str, default='youtube',
+    parser.add_argument("--output_path", type=str, default="./results")
+    parser.add_argument("--dataset", type=str, default='yoruba',
                         choices=['youtube', 'sms', 'trec', 'yoruba', 'hausa', 'cifar', 'chexpert'])
     parser.add_argument("--num_valid_samples", type=int, default=5000,
                         help="Size of a valid set to be sampled from the test set if no valid set is available")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--encoding", type=str, default=None)
     parser.add_argument("--finetuning", type=bool, default=False)
+    parser.add_argument("--adaptive_threshold", type=bool, default=False)
+    parser.add_argument("--include_bias", type=bool, default=False)
     parser.add_argument("--finetuning_epochs", type=int, default=2)
     parser.add_argument("--finetuning_batch_size", type=int, default=2)
     parser.add_argument("--modification", type=str, default="last")
     parser.add_argument("--other", type=int, default=None)
-    parser.add_argument("--closs", type=str, default='CE', choices=['CE', 'F1'])
-    parser.add_argument("--weights", type=str, default='False', choices=['True', 'False'])
+    parser.add_argument("--closs", type=str, default='F1', choices=['CE', 'F1'])
+    parser.add_argument("--weights", type=str, default='True', choices=['True', 'False'])
     parser.add_argument('--save', type=bool, default=True)
     args = parser.parse_args()
 
@@ -54,6 +56,9 @@ if __name__ == '__main__':
     # define the path from which the dataset will be loaded
     dataset_path = args.data_path if args.data_path else \
         os.path.join(os.path.split(os.path.abspath(__file__))[0], 'datasets')
+
+    storing_loc = os.path.join(os.path.split(os.path.abspath(__file__))[0], 'training_plots', args.dataset, f"comp_loss{args.closs}_weights{args.weights}")
+    os.makedirs(storing_loc, exist_ok=True)
 
     # define the name of the folder where the results will be stored
     results_folder = os.path.join(args.output_path, "results", 'single_run', 'agra', args.dataset)
@@ -83,13 +88,16 @@ if __name__ == '__main__':
         num_classes=num_classes,
         agra_weights=agra_weights,
         other=args.other,
-        agra_threshold=agra_threshold
+        agra_threshold=agra_threshold,
+        adaptive_threshold=args.adaptive_threshold,
+        storing_loc=storing_loc,
+        include_bias=args.include_bias
     )
 
     history = model.fit(
         dataset_train=train_dataset,
         dataset_valid=valid_dataset,
-
+        y_train=train_labels,
         comp_loss=args.closs,
         lr=lr,
         l2=weight_decay,
