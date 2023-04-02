@@ -16,7 +16,6 @@ from torch.utils.data import WeightedRandomSampler
 from src.AGRA.labels_recalculation_logreg import calculate_label
 from src.multi_label.logistic_regression import MaxEntNetwork
 from src.utils import get_loss
-from wrench.backbone import BackBone
 from wrench.dataset import BaseDataset, TorchDataset
 from experiments.agra.eval_plots import get_statistics, make_plots_gold
 
@@ -48,13 +47,14 @@ class LogRegModelWithAGRA:
         self.adaptive_threshold = adaptive_threshold
 
         self.num_classes = num_classes
-        self.model: Optional[BackBone] = None
+        self.model = None
         self.best_metric_value = 0
         self.best_model_state = None
         self.collect_stats = collect_stats
         self.storing_loc = storing_loc
 
-    def fit(self,
+    def fit(
+            self,
             dataset_train: BaseDataset,
             y_train: Optional[np.ndarray] = None,
             dataset_valid: Optional[BaseDataset] = None,
@@ -70,7 +70,7 @@ class LogRegModelWithAGRA:
             metric: Optional[Union[str, Callable]] = 'acc',
             tolerance: Optional[float] = -1.0,
             verbose: Optional[bool] = True,
-            **kwargs: Any):
+    ):
 
         if not verbose:
             logger.setLevel(logging.ERROR)
@@ -184,6 +184,35 @@ class LogRegModelWithAGRA:
                 self.best_metric_value = metric_value
                 self.best_model_state = copy.deepcopy(self.model.state_dict())
                 self.best_epoch = self.epoch
+        self.model.train()
+        return metric_value
+
+    def test_cifar(self, dataset_valid, batch_size, metric):
+        # validation
+        self.model.eval()
+        with torch.no_grad():
+            all_preds, all_labels = [], []
+            valid_dataloader = DataLoader(dataset_valid, batch_size=batch_size)
+            for batch, labels in valid_dataloader:
+                batch, labels = batch.to(device), labels.to(device)
+                preds = torch.argmax(self.model(batch), dim=1)
+                all_preds.append(preds.cpu().detach().numpy())
+                all_labels.append(labels.cpu().detach().numpy())
+            all_preds = np.concatenate(all_preds)
+            all_labels = np.concatenate(all_labels)
+            report = classification_report(y_true=all_labels, y_pred=all_preds, output_dict=True)
+            if metric == "acc":
+                metric_value = report["accuracy"]
+            elif metric == "f1_macro":
+                metric_value = report["macro avg"]["f1-score"]
+            elif metric == "f1_binary":
+                metric_value = report["1"]["f1-score"]
+            else:
+                raise ValueError(f"Unknown metric {metric}")
+
+            if metric_value > self.best_metric_value:
+                self.best_metric_value = metric_value
+                self.best_model_state = copy.deepcopy(self.model.state_dict())
         self.model.train()
         return metric_value
 

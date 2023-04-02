@@ -46,9 +46,9 @@ def compute_weights(train_labels) -> np.array:
 # get loss
 def get_loss(comp_loss: str, num_classes: int):
     if comp_loss == 'F1':
-        comp_loss = F1Loss(num_classes).to(device)
+        comp_loss = F1Loss(num_classes)
     else:
-        comp_loss = torch.nn.CrossEntropyLoss(reduction='mean').to(device)
+        comp_loss = torch.nn.CrossEntropyLoss(reduction='mean')
     return comp_loss
 
 

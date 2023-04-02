@@ -35,14 +35,18 @@ def run_cleanlab_baseline(
 
     output_file = os.path.join(output_path, f"{dataset}_out.txt")
 
-    train_dataset, valid_dataset, test_dataset, y_train = load_train_data_for_agra(
+    train_dataset, valid_dataset, test_dataset,  _, train_labels_noisy = load_train_data_for_agra(
         dataset, path_to_data, train_labels_path, num_valid_samples, finetuning=finetuning,
         finetuning_epochs=finetuning_epochs, finetuning_batch_size=finetuning_batch_size, metric=score
     )
+    print("Datasets are loaded")
+
+    y_train = train_labels_noisy
 
     best_metric = 0
     best_setting = None
 
+    print("Start grid search...")
     for num_folds in num_folds_values:
         for batch_size in batch_sizes:
             for learning_rate in learning_rates:
@@ -50,52 +54,52 @@ def run_cleanlab_baseline(
                     with open(output_file, "a+") as file:
                         file.write(
                             f"Setting: num_folds = {num_folds}, lr = {learning_rate}, batch_size = {batch_size} \n")
-                        print(
-                            f"Setting: num_folds = {num_folds}, lr = {learning_rate}, l2 = {regularization}, "
-                            f"batch_size = {batch_size} \n")
+                    print(
+                        f"Setting: num_folds = {num_folds}, lr = {learning_rate}, l2 = {regularization}, "
+                        f"batch_size = {batch_size} \n")
 
-                        metrics = []
+                    metrics = []
 
-                        for exp in range(num_grid_ext):
-                            seed = np.random.randint(0, 1000)
-                            set_seed(seed)
+                    for exp in range(num_grid_ext):
+                        seed = np.random.randint(0, 1000)
+                        set_seed(seed)
 
-                            clf = MLPClassifier(hidden_layer_sizes=(), alpha=regularization,
-                                                learning_rate_init=learning_rate, batch_size=batch_size,
-                                                max_iter=10000)  # any classifier implementing the sklearn API
-                            cl = CleanLearning(clf=clf, seed=seed, cv_n_folds=num_folds)
-                            _ = cl.fit(train_dataset.features, np.array(y_train).astype(int))
+                        clf = MLPClassifier(hidden_layer_sizes=(), alpha=regularization,
+                                            learning_rate_init=learning_rate, batch_size=batch_size,
+                                            max_iter=10000)  # any classifier implementing the sklearn API
+                        cl = CleanLearning(clf=clf, seed=seed, cv_n_folds=num_folds)
+                        _ = cl.fit(train_dataset.features, np.array(y_train).astype(int))
 
-                            cl_valid_preds = cl.predict(valid_dataset.features)
+                        cl_valid_preds = cl.predict(valid_dataset.features)
 
-                            if score == "acc":
-                                metric = accuracy_score(np.array(valid_dataset.labels), cl_valid_preds)
-                            elif score == "f1_binary":
-                                metric = f1_score(np.array(valid_dataset.labels), cl_valid_preds, average='binary',
-                                                  pos_label=1)
-                            elif score == "f1_macro":
-                                metric = f1_score(np.array(valid_dataset.labels), cl_valid_preds, average='macro',
-                                                  pos_label=1)
-                            else:
-                                raise ValueError("Invalid metric!")
-
-                            with open(output_file, "a+") as file:
-                                file.write(f"Exp: {exp}, {score}: {metric} \t")
-                            print(f"Exp: {exp}, {score}: {metric} \t")
-
-                            metrics.append(metric)
-                        mean_metric = np.mean(metrics)
+                        if score == "acc":
+                            metric = accuracy_score(np.array(valid_dataset.labels), cl_valid_preds)
+                        elif score == "f1_binary":
+                            metric = f1_score(np.array(valid_dataset.labels), cl_valid_preds, average='binary',
+                                              pos_label=1)
+                        elif score == "f1_macro":
+                            metric = f1_score(np.array(valid_dataset.labels), cl_valid_preds, average='macro',
+                                              pos_label=1)
+                        else:
+                            raise ValueError("Invalid metric!")
 
                         with open(output_file, "a+") as file:
-                            file.write(f"\n Mean {score}: {mean_metric} \n")
-                        print(f"\n Mean {score}: {mean_metric} \n")
+                            file.write(f"Exp: {exp}, {score}: {metric} \t")
+                        print(f"Exp: {exp}, {score}: {metric} \t")
 
-                        if mean_metric > best_metric:
-                            best_metric = mean_metric
-                            best_setting = num_folds
-                            best_lr = learning_rate
-                            best_batch = batch_size
-                            best_reg = regularization
+                        metrics.append(metric)
+                    mean_metric = np.mean(metrics)
+
+                    with open(output_file, "a+") as file:
+                        file.write(f"\n Mean {score}: {mean_metric} \n")
+                    print(f"\n Mean {score}: {mean_metric} \n")
+
+                    if mean_metric > best_metric:
+                        best_metric = mean_metric
+                        best_setting = num_folds
+                        best_lr = learning_rate
+                        best_batch = batch_size
+                        best_reg = regularization
 
     with open(output_file, "a+") as file:
         file.write(f"Selected setting is: cv_n_folds={best_setting} \n")
@@ -152,7 +156,8 @@ if __name__ == '__main__':
     parser.add_argument("--seed", help="", default=0)
     args = parser.parse_args()
 
-    for dataset in ["youtube", "sms", "spouse", "trec", "yoruba", "hausa"]:
+    # for dataset in ["youtube", "sms", "spouse", "trec", "yoruba", "hausa"]:
+    for dataset in ["trec", "yoruba", "hausa"]:
         if args.data_path is None:
             path_to_data = os.path.join(os.path.split(os.path.abspath(__file__))[0], 'datasets')
         else:

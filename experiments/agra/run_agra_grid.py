@@ -49,7 +49,7 @@ if __name__ == '__main__':
     parser.add_argument("--finetuning", type=bool, default=False)
     parser.add_argument("--finetuning_epochs", type=int, default=2)
     parser.add_argument("--finetuning_batch_size", type=int, default=2)
-    parser.add_argument("--modification", type=str, default="last")
+    parser.add_argument("--setting", type=str, default="noisy")
     parser.add_argument("--other", type=int, default=None)
     parser.add_argument("--train_loss", type=str, default=None, choices=['CE', 'F1'])
     parser.add_argument("--closs", type=str, default=None, choices=['CE', 'F1'])
@@ -88,16 +88,25 @@ if __name__ == '__main__':
     metric = define_eval_metric(args.dataset)
 
     # load dataset and training labels (mv or separately provided)
-    train_dataset, valid_dataset, test_dataset, train_labels = load_train_data_for_agra(
+    train_dataset,  train_labels_gold, train_labels_noisy, valid_dataset, test_dataset = load_train_data_for_agra(
         args.dataset, dataset_path, args.train_labels_path, args.num_valid_samples, args.finetuning_batch_size, encoding,
         finetuning=args.finetuning, finetuning_epochs=args.finetuning_epochs, metric=metric
     )
 
     # calculate num_classes
     if args.other is not None:
-        num_classes = int(max(args.other, max(train_labels), max(valid_dataset.labels))) + 1
+        num_classes = int(max(args.other, max(train_labels_gold), max(valid_dataset.labels))) + 1
     else:
-        num_classes = int(max(max(train_labels), max(valid_dataset.labels))) + 1
+        num_classes = int(max(max(train_labels_gold), max(valid_dataset.labels))) + 1
+
+    if args.setting == "gold":
+        train_labels = train_labels_gold
+        logger.info("Gold labels will be used for training.")
+    elif args.setting == "noisy":
+        logger.info("Noisy labels will be used for training.")
+        train_labels = train_labels_noisy
+    else:
+        raise ValueError("Unknown setting")
 
     weights = compute_weights(train_labels)
 
@@ -139,6 +148,7 @@ if __name__ == '__main__':
 
                     model.fit(
                         dataset_train=train_dataset,
+                        y_train=train_labels,
                         dataset_valid=valid_dataset,
 
                         lr=lr,
@@ -147,7 +157,6 @@ if __name__ == '__main__':
                         batch_size=batch_size,
                         num_epochs=num_epochs,
 
-                        modification=args.modification,
                         metric=metric,
                         verbose=True
                     )
@@ -194,6 +203,7 @@ if __name__ == '__main__':
 
                 model.fit(
                     dataset_train=train_dataset,
+                    y_train=train_labels,
                     dataset_valid=valid_dataset,
 
                     lr=best_lr,
@@ -202,7 +212,6 @@ if __name__ == '__main__':
                     batch_size=best_batch_size,
                     num_epochs=num_epochs,
 
-                    modification=args.modification,
                     metric=metric,
                     verbose=True
                 )

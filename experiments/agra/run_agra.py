@@ -1,6 +1,6 @@
 import argparse
 import os
-
+import logging
 import torch
 
 from experiments.agra.utils import define_data_encoding_agra, \
@@ -8,6 +8,8 @@ from experiments.agra.utils import define_data_encoding_agra, \
 from experiments.utils import define_eval_metric
 from src.AGRA.logreg_model_with_AGRA import LogRegModelWithAGRA
 from src.utils import set_seed, compute_weights
+
+logger = logging.getLogger(__name__)
 
 lr = 0.1
 weight_decay = 0.00001
@@ -25,7 +27,7 @@ if __name__ == '__main__':
     parser.add_argument("--train_labels_path", type=str, default=None)
     parser.add_argument("--gold_label_path", type=str, default=None)
     parser.add_argument("--output_path", type=str, default="./results")
-    parser.add_argument("--dataset", type=str, default='yoruba',
+    parser.add_argument("--dataset", type=str, default='youtube',
                         choices=['youtube', 'sms', 'trec', 'yoruba', 'hausa', 'cifar', 'chexpert'])
     parser.add_argument("--num_valid_samples", type=int, default=5000,
                         help="Size of a valid set to be sampled from the test set if no valid set is available")
@@ -41,9 +43,9 @@ if __name__ == '__main__':
     parser.add_argument("--closs", type=str, default='F1', choices=['CE', 'F1'])
     parser.add_argument("--weights", type=str, default='True', choices=['True', 'False'])
     parser.add_argument('--save', type=bool, default=True)
-    args = parser.parse_args()
 
-    print(args)
+    args = parser.parse_args()
+    logger.info(args)
 
     # set the seed
     if args.seed is not None:
