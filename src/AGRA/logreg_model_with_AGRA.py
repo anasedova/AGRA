@@ -5,6 +5,7 @@ import logging
 import warnings
 from typing import Any, Optional, Union, Callable
 
+import math
 import numpy as np
 import torch
 from sklearn.metrics import classification_report
@@ -17,6 +18,7 @@ from src.multi_label.logistic_regression import MaxEntNetwork
 from src.utils import get_loss
 from wrench.backbone import BackBone
 from wrench.dataset import BaseDataset, TorchDataset
+from experiments.agra.eval_plots import get_statistics, make_plots_gold
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 warnings.filterwarnings("ignore", category=UserWarning)         # ignore UserWarning
@@ -26,12 +28,14 @@ logger = logging.getLogger(__name__)
 class LogRegModelWithAGRA:
     def __init__(self,
                  num_classes: int,
-                 include_bias: bool = True,
+                 include_bias: bool = False,
                  adaptive_threshold: bool = True,
                  other: int = None,
                  agra_threshold: float = 0,
                  agra_weights: torch.tensor = None,
-                 ignore_index: int = -100
+                 ignore_index: int = -100,
+                 collect_stats: bool = False,
+                 storing_loc: str = None,
                  ):
         super().__init__()
 
@@ -47,6 +51,8 @@ class LogRegModelWithAGRA:
         self.model: Optional[BackBone] = None
         self.best_metric_value = 0
         self.best_model_state = None
+        self.collect_stats = collect_stats
+        self.storing_loc = storing_loc
 
     def fit(self,
             dataset_train: BaseDataset,
@@ -75,10 +81,11 @@ class LogRegModelWithAGRA:
         train_dataloader = DataLoader(TorchDataset(dataset_train), batch_size=batch_size, shuffle=True)
 
         if y_train is None:
-            y_train = torch.Tensor(dataset_train.weak_labels)
+            y_train = torch.Tensor(dataset_train.labels)
         else:
             y_train = torch.Tensor(y_train)  # weak labels
-        # y_gold = torch.Tensor(dataset_train.labels)  # gold labels
+        y_gold = torch.Tensor(dataset_train.labels)  # gold labels
+        num_samples = len(y_train)
 
         if self.agra_weights is None:
             self.agra_weights = np.ones(dataset_train.features.shape[0])
@@ -94,7 +101,10 @@ class LogRegModelWithAGRA:
         update_criterion = nn.CrossEntropyLoss(reduction="mean", ignore_index=self.ignore_index)
         optimizer = optim.Adam(self.model.parameters(), lr=lr, weight_decay=l2)
 
+        stats = []
+        self.best_epoch = 0
         for epoch in range(num_epochs):
+            self.epoch = epoch
             self.model.train()
             for batch in train_dataloader:
                 optimizer.zero_grad()
@@ -102,6 +112,7 @@ class LogRegModelWithAGRA:
                 # retrieve the weak labels
                 train_samples = batch["ids"]
                 weak_train_labels = y_train[train_samples].long()
+                gold_train_labels = y_gold[train_samples].long()
 
                 # sample a comparison batch
                 idx = list(WeightedRandomSampler(self.agra_weights, num_samples=comp_batch_size, replacement=False))
@@ -116,6 +127,9 @@ class LogRegModelWithAGRA:
                                                 threshold=self.agra_threshold,
                                                 include_bias=self.include_bias,
                                                 adaptive_threshold=self.adaptive_threshold)
+                if self.collect_stats is True:
+                    stats_gold = get_statistics(weak_labels=weak_train_labels, chosen_labels=chosen_labels, gold_labels=gold_train_labels, other=self.other, ignore_index=self.ignore_index)
+                    stats.append(stats_gold)
 
                 # remove ignored samples and their model outputs
                 ignore_samples = np.where(chosen_labels == self.ignore_index)
@@ -138,15 +152,20 @@ class LogRegModelWithAGRA:
         # logger.info(f"The best metric: {self.best_metric_value}, the model state will be loaded...")
         self.model.load_state_dict(self.best_model_state)
 
+        if self.collect_stats is True:
+            stats_gold_plot = stats[0:(math.ceil(num_samples / batch_size)*(self.best_epoch + 1))]
+            make_plots_gold(stats_gold_plot, storing_loc=self.storing_loc)
+
     def test(self, dataset_valid, batch_size, metric):
         # validation
         self.model.eval()
         with torch.no_grad():
             all_preds, all_labels = [], []
-            valid_dataloader = DataLoader(dataset_valid, batch_size=batch_size)
-            for batch, labels in valid_dataloader:
-                batch, labels = batch.to(device), labels.to(device)
-                preds = torch.argmax(self.model(batch), dim=1)
+            valid_dataloader = DataLoader(TorchDataset(dataset_valid), batch_size=batch_size)
+            for batch in valid_dataloader:
+                ex = batch['features'].to(device)
+                labels = batch['labels'].to(device)
+                preds = torch.argmax(self.model(ex), dim=1)
                 all_preds.append(preds.cpu().detach().numpy())
                 all_labels.append(labels.cpu().detach().numpy())
             all_preds = np.concatenate(all_preds)
@@ -154,14 +173,17 @@ class LogRegModelWithAGRA:
             report = classification_report(y_true=all_labels, y_pred=all_preds, output_dict=True)
             if metric == "acc":
                 metric_value = report["accuracy"]
-            elif metric == "f1":
-                metric_value = report["macro avg"]
+            elif metric == "f1_macro":
+                metric_value = report["macro avg"]["f1-score"]
+            elif metric == "f1_binary":
+                metric_value = report["1"]["f1-score"]
             else:
                 raise ValueError(f"Unknown metric {metric}")
 
             if metric_value > self.best_metric_value:
                 self.best_metric_value = metric_value
                 self.best_model_state = copy.deepcopy(self.model.state_dict())
+                self.best_epoch = self.epoch
         self.model.train()
         return metric_value
 
