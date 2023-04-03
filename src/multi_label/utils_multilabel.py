@@ -5,6 +5,7 @@ import numpy as np
 import random
 import torch
 from torch.utils.data import Dataset
+from typing import Tuple, List
 
 
 def set_seed(seed: int) -> None:
@@ -35,31 +36,34 @@ class AGRADataset(Dataset):
         return self.len
 
 
-def load_data(storing_loc_data):
-    # train_data = pd.read_csv(os.path.join(storing_loc_data, "train_embeddings.csv"), header=None)
-    train_data = joblib.load(os.path.join(storing_loc_data, "train_embeddings.lib"))
+def load_image_dataset(
+        # todo: add other part again
+        data_path, dataset, encoding: str = "resnet50"
+) -> Tuple[List[List], List[List], List[List]]:
+    """ Load the train, valid and test sets for image dataset (currently: Cifar, CheXpert) """
 
-    X_train = train_data.iloc[:, 0:1280]
-    y_train = train_data.iloc[:, 1280:train_data.shape[1]]
+    if os.path.exists(os.path.join(data_path, dataset, f"encoded_{encoding}")):
+        train_embeddings = joblib.load(os.path.join(data_path, dataset, f"encoded_{encoding}", f"train_embeddings_{encoding}.data"))
+        valid_embeddings = joblib.load(os.path.join(data_path, dataset, f"encoded_{encoding}", f"valid_embeddings_{encoding}.data"))
+        test_embeddings = joblib.load(os.path.join(data_path, dataset, f"encoded_{encoding}", f"test_embeddings_{encoding}.data"))
+        print(f"Embeddings are loaded from {os.path.join(data_path, dataset, f'encoded_{encoding}')}")
 
-    X_train = X_train.to_numpy()
-    y_train = y_train.to_numpy()
+    else:
+        raise ValueError('Specified embeddings not available.')
 
-    # dev_data = pd.read_csv(os.path.join(storing_loc_data, "valid_embeddings.csv"), header=None)
-    dev_data = joblib.load(os.path.join(storing_loc_data, "valid_embeddings.lib"))
-    X_dev = dev_data.iloc[:, 0:1280]
-    y_dev = dev_data.iloc[:, 1280:train_data.shape[1]]
+    return train_embeddings, valid_embeddings, test_embeddings
 
-    X_dev = X_dev.to_numpy()
-    y_dev = y_dev.to_numpy()
+def load_image_labels(
+        # todo: add other part again
+        data_path, dataset, encoding: str = "resnet50"
+) -> Tuple[List[List], List[List], List[List]]:
+    """ Load the train, valid and test sets for image dataset (currently: Cifar, CheXpert) """
 
-    # test_data = pd.read_csv(os.path.join(storing_loc_data, "test_embeddings.csv"), header=None)
-    test_data = joblib.load(os.path.join(storing_loc_data, "test_embeddings.lib"))
+    train_labels = joblib.load(os.path.join(data_path, dataset, f"encoded_{encoding}", f"train_labels.data"))
+    valid_labels = joblib.load(os.path.join(data_path, dataset, f"encoded_{encoding}", f"valid_labels.data"))
+    test_labels = joblib.load(os.path.join(data_path, dataset, f"encoded_{encoding}", f"test_labels.data"))
+    print(f"Labels are loaded from {os.path.join(data_path, dataset, f'encoded_{encoding}')}")
 
-    X_test = test_data.iloc[:, 0:1280]
-    y_test = test_data.iloc[:, 1280:train_data.shape[1]]
+    return train_labels, valid_labels, test_labels
 
-    X_test = X_test.to_numpy()
-    y_test = y_test.to_numpy()
 
-    return X_train, y_train, X_dev, y_dev, X_test, y_test

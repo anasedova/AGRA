@@ -72,10 +72,9 @@ def smooth_collect_stats(collect_stats, tuple_index, smoothing_length, batch_siz
     return smoothed_stats
 
 
-def eval_performance(net, dataset, return_preds=False):
+def eval_performance(net, dataset, return_preds=False, metric_avg='macro'):
     prediction_probs = []
     labels = []
-
     # get predictions
     with torch.no_grad():
         for i, (data, target) in enumerate(dataset):
@@ -93,7 +92,7 @@ def eval_performance(net, dataset, return_preds=False):
 
     # compute AUROC
     roc_auc = roc_auc_score(labels, prediction_probs, average=None)
-    mean_auc = np.mean(roc_auc)
+    mean_auc = roc_auc_score(labels, prediction_probs, average=metric_avg)
 
     print("AUROC per class:", roc_auc)
     print("Mean AUROC", mean_auc, "\n")
