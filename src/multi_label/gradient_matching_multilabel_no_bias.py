@@ -187,28 +187,28 @@ def train_grad_match_multilabel(
 
     test_auroc, test_probs = eval_performance(net_AGRA, test_data, metric_avg=metric_avg, return_preds=True)
 
-    # label_0_kept, label_0_ignored, label_1_kept, label_1_ignored = [sum(x) for x in zip(
-    #     *statistics[0:(math.ceil(number_of_train_samples / batch_size) * best_epoch)])]
-    # logger.info(
-    #     f'label_0_kept: {label_0_kept}, label_0_ignored: {label_0_ignored}, label_1_kept: {label_1_kept}, '
-    #     f'label_1_ignored: {label_1_ignored} '
-    # )
-    # logger.info(
-    #     f'label_0_kept%: {label_0_kept / (label_0_kept + label_0_ignored)}, '
-    #     f'label_0_ignored%: {label_0_ignored / (label_0_kept + label_0_ignored)}, '
-    #     f'label_1_kept%: {label_1_kept / (label_1_kept + label_1_ignored)}, '
-    #     f'label_1_ignored:% {label_1_ignored / (label_1_kept + label_1_ignored)}'
-    # )
-    #
-    # ignored_0 = label_0_ignored / (label_0_kept + label_0_ignored + label_1_kept + label_1_ignored)
-    # ignored_1 = label_1_ignored / (label_0_kept + label_0_ignored + label_1_kept + label_1_ignored)
-    #
-    # kept_0 = label_0_kept / (label_0_kept + label_0_ignored + label_1_kept + label_1_ignored)
-    # kept_1 = label_1_kept / (label_0_kept + label_0_ignored + label_1_kept + label_1_ignored)
+    label_0_kept, label_0_ignored, label_1_kept, label_1_ignored = [sum(x) for x in zip(
+        *statistics[0:(math.ceil(number_of_train_samples / batch_size) * best_epoch)])]
+    logger.info(
+        f'label_0_kept: {label_0_kept}, label_0_ignored: {label_0_ignored}, label_1_kept: {label_1_kept}, '
+        f'label_1_ignored: {label_1_ignored} '
+    )
+    logger.info(
+        f'label_0_kept%: {label_0_kept / (label_0_kept + label_0_ignored)}, '
+        f'label_0_ignored%: {label_0_ignored / (label_0_kept + label_0_ignored)}, '
+        f'label_1_kept%: {label_1_kept / (label_1_kept + label_1_ignored)}, '
+        f'label_1_ignored:% {label_1_ignored / (label_1_kept + label_1_ignored)}'
+    )
+
+    ignored_0 = label_0_ignored / (label_0_kept + label_0_ignored + label_1_kept + label_1_ignored)
+    ignored_1 = label_1_ignored / (label_0_kept + label_0_ignored + label_1_kept + label_1_ignored)
+
+    kept_0 = label_0_kept / (label_0_kept + label_0_ignored + label_1_kept + label_1_ignored)
+    kept_1 = label_1_kept / (label_0_kept + label_0_ignored + label_1_kept + label_1_ignored)
 
     # plot the statistics
     if print_plots:
         make_plots(statistics, smoothing_length=10)
         make_legend(statistics, smoothing_length=10)
 
-    return val_auroc, test_auroc, 0, 0, 0, 0, dev_probs, test_probs # val_auroc, test_auroc, ignored_0, ignored_1, kept_0, kept_1, dev_probs, test_probs
+    return val_auroc, test_auroc, ignored_0, ignored_1, kept_0, kept_1, dev_probs, test_probs # val_auroc, test_auroc, ignored_0, ignored_1, kept_0, kept_1, dev_probs, test_probs
