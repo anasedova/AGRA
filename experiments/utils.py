@@ -8,15 +8,14 @@ import numpy as np
 import torch
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
-
+from snorkel.utils import probs_to_preds
 from wrench.evaluation import METRIC
 from wrench.labelmodel.majority_voting import MajorityVoting
-from snorkel.utils import probs_to_preds
 
 
-def define_eval_metric(dataset):
+def define_eval_metric(dataset: str):
     """
-    Load the evaluation metric associated with the dataset.
+    load the evaluation metric associated with the dataset
     """
     if dataset in ['youtube', 'trec', 'cifar']:
         return 'acc'
@@ -30,9 +29,9 @@ def define_eval_metric(dataset):
         raise ValueError('Dataset not available.')
 
 
-def get_cifar_data(dataset_path, num_valid_samples, transformation="standard"):
+def get_cifar_data(dataset_path: str, num_valid_samples: int, transformation="standard"):
     """
-    Transform CIFAR data.
+    transform CIFAR data
     """
     train_path = os.path.join(dataset_path, 'train')
     test_path = os.path.join(dataset_path, 'test')
@@ -90,7 +89,7 @@ def get_cifar_data(dataset_path, num_valid_samples, transformation="standard"):
 
 def get_mv_train_labels(data):
     """
-    Retrieve majority vote labels.
+    retrieve majority vote labels.
     """
     # get the labels by majority voting for train data
     label_model = MajorityVoting()
@@ -99,9 +98,9 @@ def get_mv_train_labels(data):
     return probs_to_preds(soft_labels_train)
 
 
-def load_train_labels_from_file(dataset_path, train_labels_path, dataset):
+def load_train_labels_from_file(dataset_path: str, train_labels_path: str, dataset:str):
     """
-    Load noisy CIFAR-10 labels
+    load noisy CIFAR-10 labels
     """
     assert train_labels_path is not None
     with open(train_labels_path, 'r') as rf:
@@ -118,12 +117,12 @@ def load_train_labels_from_file(dataset_path, train_labels_path, dataset):
 
 
 def define_metric(metric: Optional[Union[str, Callable]]) -> None:
-    # initialize metric
+    """initialize metric"""
     return metric if isinstance(metric, Callable) else METRIC[metric]
 
 def load_parameter_setting_for_youtube(loss: str, use_weights: str):
     """
-    Loads the hyperparameter setting for each youtube combination
+    loads the hyperparameter setting for each youtube combination
     :return: chosen batch size, learning rate and weight decay
     """
 
@@ -151,89 +150,3 @@ def load_parameter_setting_for_youtube(loss: str, use_weights: str):
         raise ValueError('Invalid loss and weights combination.')
 
     return batch_size, lr, decay
-
-def load_parameter_setting(dataset: str):
-    """
-    Load chosen hyperparameters reported in paper.
-    """
-
-    if dataset == 'youtube':
-        lr = 0.01
-        batch_size = 32
-        weight_decay = 0.001
-        closs = 'F1'
-        weights = 'False'
-        other = None
-        agra_threshold = 0
-        num_epochs = 10
-        n_exp = 5
-        encoding = "tfidf"
-
-    elif dataset == 'sms':
-        lr = 0.001
-        batch_size = 128
-        weight_decay = 0.001
-        closs = 'CE'
-        weights = 'True'
-        other = None
-        agra_threshold = 0
-        num_epochs = 10
-        n_exp = 5
-        encoding = "tfidf"
-
-    elif dataset == 'trec':
-        # gives significantly worse performance than in paper: CHECK!
-        lr = 0.1
-        batch_size = 32
-        weight_decay = 0.0001
-        closs = 'F1'
-        weights = 'True'
-        other = None
-        agra_threshold = 0
-        num_epochs = 10
-        n_exp = 5
-        encoding = "tfidf"
-
-    elif dataset == 'yoruba':
-        lr = 0.1
-        batch_size = 512
-        weight_decay = 0.0001
-        closs = 'F1'
-        weights = 'True'
-        other = None
-        agra_threshold = 0
-        num_epochs = 10
-        n_exp = 5
-        encoding = "tfidf"
-
-    elif dataset == 'hausa':
-        lr = 0.1
-        batch_size = 512
-        weight_decay = 0.0001
-        closs = 'F1'
-        weights = 'True'
-        other = None
-        agra_threshold = 0
-        num_epochs = 10
-        n_exp = 5
-        encoding = "tfidf"
-
-    elif dataset == 'chexpert':
-        lr = 0.001
-        batch_size = 128
-        weight_decay = 0.001
-        closs = 'F1'
-        weights = 'False'
-        other = None
-        agra_threshold = 0
-        num_epochs = 5
-        n_exp = 5
-        encoding = "tfidf"
-
-    elif dataset == 'cifar':
-        pass
-
-    else:
-        raise ValueError('Invalid dataset.')
-
-    return lr, batch_size, weight_decay, closs, weights, other, agra_threshold, num_epochs, n_exp, encoding
