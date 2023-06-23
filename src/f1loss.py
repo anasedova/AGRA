@@ -1,10 +1,11 @@
-import torch
-import math
 import copy
+import math
+
+import torch
 
 
 class F1Loss:
-    """ class that implements the proposed versions of the F1 loss for single-label datasets """
+    """class that implements the proposed versions of the F1 loss for single-label datasets"""
 
     def __init__(self, num_classes):
         self.num_classes = num_classes
@@ -15,10 +16,10 @@ class F1Loss:
 
             softmax = torch.nn.Softmax(dim=1)
             all_preds = softmax(predictions)
-            preds = all_preds[:, 1]     # probabilities of class 1
-            tp = torch.sum(preds * labels)      # sum of probs of belonging to pos. assigned to truly positive samples
-            fp = torch.sum(preds*(1-labels))  # sum of probs of belonging to pos. assigned to negative samples
-            fn = torch.sum((1-preds)*labels)  # sum of probs of belonging to neg. assigned to positive samples
+            preds = all_preds[:, 1]
+            tp = torch.sum(preds * labels)
+            fp = torch.sum(preds*(1-labels))
+            fn = torch.sum((1-preds)*labels)
 
             # tp + fn = number positive labels
             L_F1 = 1-(2 * tp)/(2 * tp + fn + fp + 0.00001)
@@ -30,23 +31,22 @@ class F1Loss:
 
             # define soft-max
             softmax = torch.nn.Softmax(dim=1)
-            f1 = torch.zeros(self.num_classes)  # storing location for f1 of each class
-            preds = softmax(predictions)  # probability for each class for each example
+            f1 = torch.zeros(self.num_classes)
+            preds = softmax(predictions)
 
             for label in range(0, self.num_classes):
 
-                # binarize labels -> 1: belongs to label, 0: does not belong to label
                 labels_bin = copy.deepcopy(labels)
                 labels_bin = torch.where(labels_bin == label, 1, 0)
 
                 # compute the f1 score for the class
-                tp = torch.sum(preds[:, label] * labels_bin) # sum of probs that elements that belong to this label are predicted this label
-                fp = torch.sum(preds[:, label] * (1 - labels_bin)) # sum of probs that elements that do not belong to this labels are predicted this label
-                fn = torch.sum((1 - preds[:, label]) * labels_bin) # sum of probs that elements belonging to this label are classified differently
+                tp = torch.sum(preds[:, label] * labels_bin)
+                fp = torch.sum(preds[:, label] * (1 - labels_bin))
+                fn = torch.sum((1 - preds[:, label]) * labels_bin)
 
                 f1[label] = (2 * tp)/(2 * tp + fn + fp + 0.00001)
 
-            # define loss 1-macro_F1
+            # define loss as 1-macro_F1
             L_F1 = 1 - torch.mean(f1)
 
             if math.isnan(L_F1) or math.isinf(L_F1):
@@ -54,5 +54,37 @@ class F1Loss:
 
         else:
             raise ValueError("Invalid number of classes")
+
+        return L_F1
+
+class F1LossMulti:
+    """class that implements the macro-F1 loss for multi-label datasets"""
+
+    def __init__(self, ignore_index=None):
+        self.ignore_index = ignore_index
+
+    def __call__(self, predictions, labels):
+
+        exp_tp = predictions * labels
+        exp_fp = predictions * (1 - labels)
+        exp_fn = (1 - predictions) * labels
+
+        if self.ignore_index is not None:  # set values of ignored samples to 0
+            mask = torch.where(labels == self.ignore_index)
+
+            exp_tp[mask] = 0
+            exp_fp[mask] = 0
+            exp_fn[mask] = 0
+
+        tp = torch.sum(exp_tp, dim=0)
+        fp = torch.sum(exp_fp, dim=0)
+        fn = torch.sum(exp_fn, dim=0)
+
+        f1_per_class = (2 * tp) / (2 * tp + fn + fp + 0.00001)
+
+        L_F1 = torch.mean(1-f1_per_class)
+
+        if math.isnan(L_F1) or math.isinf(L_F1):
+            raise RuntimeError("Loss returns NaN or Inf")
 
         return L_F1

@@ -1,4 +1,8 @@
 """
+Code retrieved from https://github.com/cybertronai/autograd-hacks
+"""
+
+"""
 Library for extracting interesting quantites from autograd, see README.md
 
 Not thread-safe because of module-level variables
@@ -20,7 +24,6 @@ A, activations: inputs into current layer
 B, backprops: backprop values (aka Lop aka Jacobian-vector product) observed at current layer
 
 """
-#https://github.com/cybertronai/autograd-hacks
 
 from typing import List
 
