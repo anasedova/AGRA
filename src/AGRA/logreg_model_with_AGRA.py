@@ -2,22 +2,22 @@
 
 import copy
 import logging
-import warnings
-from typing import Any, Optional, Union, Callable
-
 import math
+import warnings
+from typing import Optional, Union, Callable
+
 import numpy as np
 import torch
 from sklearn.metrics import classification_report
 from torch import optim, nn
 from torch.utils.data import DataLoader
 from torch.utils.data import WeightedRandomSampler
+from wrench.dataset import BaseDataset, TorchDataset
 
 from src.AGRA.labels_recalculation_logreg import calculate_label
-from src.multi_label.logistic_regression import MaxEntNetwork
-from src.utils import get_loss
-from wrench.dataset import BaseDataset, TorchDataset
-from experiments.agra.eval_plots import get_statistics, make_plots_gold
+from src.AGRA.logistic_regression import MaxEntNetwork
+from src.eval_plots import get_statistics, make_plots_gold
+from src.utils import get_loss, set_seed
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 warnings.filterwarnings("ignore", category=UserWarning)         # ignore UserWarning
@@ -35,6 +35,7 @@ class LogRegModelWithAGRA:
                  ignore_index: int = -100,
                  collect_stats: bool = False,
                  storing_loc: str = None,
+                 smooth: int = 1
                  ):
         super().__init__()
 
@@ -52,28 +53,33 @@ class LogRegModelWithAGRA:
         self.best_model_state = None
         self.collect_stats = collect_stats
         self.storing_loc = storing_loc
+        self.smooth = smooth
 
     def fit(
             self,
             dataset_train: BaseDataset,
             y_train: Optional[np.ndarray] = None,
             dataset_valid: Optional[BaseDataset] = None,
-            y_valid: Optional[np.ndarray] = None,
-
             lr: Optional[float] = 1e-4,
             l2: Optional[float] = 0.0,
             batch_size: Optional[int] = 32,
             comp_loss: str = "CE",
             num_epochs: int = 10,
-
             comp_batch_size: int = None,
             metric: Optional[Union[str, Callable]] = 'acc',
-            tolerance: Optional[float] = -1.0,
             verbose: Optional[bool] = True,
+            seed: int = None
     ):
+
+        if seed is not None:
+            set_seed(seed)
 
         if not verbose:
             logger.setLevel(logging.ERROR)
+
+        # initialize the model
+        input_size = dataset_train.features.shape[1]  # size of feature vector
+        self.model = MaxEntNetwork(input_size, self.num_classes).to(device)
 
         if comp_batch_size is None:
             comp_batch_size = batch_size
@@ -81,7 +87,7 @@ class LogRegModelWithAGRA:
         train_dataloader = DataLoader(TorchDataset(dataset_train), batch_size=batch_size, shuffle=True)
 
         if y_train is None:
-            y_train = torch.Tensor(dataset_train.labels)
+            y_train = torch.Tensor(dataset_train.labels) # this are the gold labels
         else:
             y_train = torch.Tensor(y_train)  # weak labels
         y_gold = torch.Tensor(dataset_train.labels)  # gold labels
@@ -91,23 +97,18 @@ class LogRegModelWithAGRA:
             self.agra_weights = np.ones(dataset_train.features.shape[0])
         self.agra_weights = torch.FloatTensor(self.agra_weights)
 
-        input_size = dataset_train.features.shape[1]  # size of feature vector
-
-        # initialize the model
-        self.model = MaxEntNetwork(input_size, self.num_classes).to(device)
-
         # initialize loss & optimizer
-        comparison_criterion = get_loss(comp_loss, self.num_classes)
-        update_criterion = nn.CrossEntropyLoss(reduction="mean", ignore_index=self.ignore_index)
+        comparison_criterion, loss_type = get_loss(comp_loss, self.num_classes, multilabel=False)
+        update_criterion = nn.CrossEntropyLoss(ignore_index=self.ignore_index)
         optimizer = optim.Adam(self.model.parameters(), lr=lr, weight_decay=l2)
 
         stats = []
         self.best_epoch = 0
         for epoch in range(num_epochs):
+            print('Epoch', epoch)
             self.epoch = epoch
             self.model.train()
             for batch in train_dataloader:
-                optimizer.zero_grad()
 
                 # retrieve the weak labels
                 train_samples = batch["ids"]
@@ -126,7 +127,8 @@ class LogRegModelWithAGRA:
                                                 ignore_index=self.ignore_index, other_class=self.other,
                                                 threshold=self.agra_threshold,
                                                 include_bias=self.include_bias,
-                                                adaptive_threshold=self.adaptive_threshold)
+                                                adaptive_threshold=self.adaptive_threshold,
+                                                loss_type=loss_type)
                 if self.collect_stats is True:
                     stats_gold = get_statistics(weak_labels=weak_train_labels, chosen_labels=chosen_labels, gold_labels=gold_train_labels, other=self.other, ignore_index=self.ignore_index)
                     stats.append(stats_gold)
@@ -135,6 +137,7 @@ class LogRegModelWithAGRA:
                 ignore_samples = np.where(chosen_labels == self.ignore_index)
                 chosen_labels = np.delete(chosen_labels, ignore_samples)
                 chosen_labels = torch.Tensor(chosen_labels).to(device)
+                optimizer.zero_grad()
                 if len(chosen_labels) > 0:
                     outputs = self.model(batch["features"].to(device))
                     remove_mask = np.zeros([len(outputs)])
@@ -146,18 +149,18 @@ class LogRegModelWithAGRA:
                     loss.backward()
                     optimizer.step()
 
+            # for selection of best epoch on validation set
             _ = self.test(dataset_valid, batch_size, metric)
-            # print(f"Epoch {epoch} \t valid metric: {metric_value}")
 
-        # logger.info(f"The best metric: {self.best_metric_value}, the model state will be loaded...")
         self.model.load_state_dict(self.best_model_state)
 
         if self.collect_stats is True:
             stats_gold_plot = stats[0:(math.ceil(num_samples / batch_size)*(self.best_epoch + 1))]
-            make_plots_gold(stats_gold_plot, storing_loc=self.storing_loc)
+            make_plots_gold(stats_gold_plot, storing_loc=self.storing_loc, smoothing_length=self.smooth)
 
-    def test(self, dataset_valid, batch_size, metric):
-        # validation
+        return self.best_metric_value
+
+    def test(self, dataset_valid, batch_size, metric, test_mode: bool = False):
         self.model.eval()
         with torch.no_grad():
             all_preds, all_labels = [], []
@@ -180,39 +183,40 @@ class LogRegModelWithAGRA:
             else:
                 raise ValueError(f"Unknown metric {metric}")
 
-            if metric_value > self.best_metric_value:
+            if test_mode is False:
+                # record metrics for choosing best epoch on validation
+                if metric_value > self.best_metric_value:
+                    self.best_metric_value = metric_value
+                    self.best_model_state = copy.deepcopy(self.model.state_dict())
+                    self.best_epoch = self.epoch
+                self.model.train()
+
+        return metric_value
+
+    def test_no_batches(self, dataset_valid, batch_size, metric, test_mode=False):
+        """
+        This version was used for running the ECML experiments, for large datasets the "test" function is more suitable
+        """
+        self.model.eval()
+        valid_data = TorchDataset(dataset_valid)
+        with torch.no_grad():
+            dev_prediction_probas = self.model(torch.tensor(valid_data.features).to(device))
+            dev_predictions = torch.argmax(dev_prediction_probas, dim=1)
+        report = classification_report(y_true=torch.tensor(valid_data.labels), y_pred=dev_predictions.cpu(), output_dict=True)
+        if metric == "acc":
+            metric_value = report["accuracy"]
+        elif metric == "f1_macro":
+            metric_value = report["macro avg"]["f1-score"]
+        elif metric == "f1_binary":
+            metric_value = report["1"]["f1-score"]
+        else:
+            raise ValueError(f"Unknown metric {metric}")
+        if test_mode is False:
+            # record metrics for choosing best epoch on validation
+            if metric_value >= self.best_metric_value:
                 self.best_metric_value = metric_value
                 self.best_model_state = copy.deepcopy(self.model.state_dict())
                 self.best_epoch = self.epoch
-        self.model.train()
+            self.model.train()
+
         return metric_value
-
-    def test_cifar(self, dataset_valid, batch_size, metric):
-        # validation
-        self.model.eval()
-        with torch.no_grad():
-            all_preds, all_labels = [], []
-            valid_dataloader = DataLoader(dataset_valid, batch_size=batch_size)
-            for batch, labels in valid_dataloader:
-                batch, labels = batch.to(device), labels.to(device)
-                preds = torch.argmax(self.model(batch), dim=1)
-                all_preds.append(preds.cpu().detach().numpy())
-                all_labels.append(labels.cpu().detach().numpy())
-            all_preds = np.concatenate(all_preds)
-            all_labels = np.concatenate(all_labels)
-            report = classification_report(y_true=all_labels, y_pred=all_preds, output_dict=True)
-            if metric == "acc":
-                metric_value = report["accuracy"]
-            elif metric == "f1_macro":
-                metric_value = report["macro avg"]["f1-score"]
-            elif metric == "f1_binary":
-                metric_value = report["1"]["f1-score"]
-            else:
-                raise ValueError(f"Unknown metric {metric}")
-
-            if metric_value > self.best_metric_value:
-                self.best_metric_value = metric_value
-                self.best_model_state = copy.deepcopy(self.model.state_dict())
-        self.model.train()
-        return metric_value
-
