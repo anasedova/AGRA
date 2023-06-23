@@ -1,7 +1,7 @@
 import copy
 import os
 import pickle
-from typing import List, Tuple, Any
+from typing import List, Any
 
 import joblib
 import numpy as np
@@ -69,8 +69,10 @@ def define_data_encoding_agra(args) -> str:
     else:
         if args.dataset in ['youtube', 'sms', 'trec', 'yoruba', 'hausa']:
             return "tfidf"
-        elif args.dataset in ["cifar", "chexpert"]:
+        elif args.dataset in ["cifar"]:
             return "resnet50"
+        elif args.dataset in ["chexpert"]:
+            return "efficientnetb0"
         else:
             raise ValueError(f"Unknown dataset {args.dataset}, please specify how you want to encode the data")
 
@@ -100,24 +102,24 @@ def get_resnet_embedding(train_loader: DataLoader, f_model: Any = None) -> np.nd
     embeddings = np.stack(embeddings, axis=0)
     all_labels = np.concatenate(all_labels)
 
-    # print(len(list_embeddings))           # 50000
-    # print(np.array(list_embeddings[0]).shape)         # 2048
     return embeddings, all_labels
 
 
 def finetune_resnet(
         f_model, train_loader, valid_loader, epochs=2, metric="acc", lr=1e-1, momentum=0.9, weight_decay=0.0005,
-        lr_decay=0.1
+        lr_decay=0.1, multilabel: bool = False
 ):
     """ Fine-tune the pretrained model (e.g. ResNet) before extracting the embeddings """
 
     assert metric in METRIC.keys()
     metric_fn = METRIC[metric]
 
-    criterion = torch.nn.CrossEntropyLoss(reduction='mean')
-    # optimizer = AdamW(f_model.parameters(), lr=lr, weight_decay=weight_decay)
-    # optimizer = torch.optim.SGD(f_model.parameters(), lr=lr, weight_decay=weight_decay, momentum=momentum)    #  CORES
-    optimizer = AdamW(f_model.parameters(), lr=1e-3, weight_decay=0.0)  # the setting from 29.03
+    if multilabel is False:
+        criterion = torch.nn.CrossEntropyLoss(reduction='mean')
+    else:
+        criterion = torch.nn.BCELoss(reduction='mean')
+
+    optimizer = AdamW(f_model.parameters(), lr=0.001, weight_decay=0.0)
     f_model.train()
     optimizer.zero_grad()
 
@@ -149,55 +151,20 @@ def finetune_resnet(
         print(f"Current validation {metric} is {valid_metric}")
         f_model.train()
 
-        if valid_metric > best_metric:
-            best_metric = valid_metric
-            best_model = copy.deepcopy(f_model.state_dict())
-            best_epoch = n_epoch
-
-    # f_model.load_state_dict(best_model)
-    # print(f"The best metric {best_metric} was achieved at epoch {best_epoch}; "
-    #       f"this model was used to calculate the embeddings.")
     print(f"The model was fine-tuned for {epochs} epochs. ")
 
     return f_model
 
 
-def get_resnet_embedding_ver_2(train_loader):
-    """
-    https://discuss.pytorch.org/t/how-can-l-use-the-pre-trained-resnet-to-extract-feautres-from-my-own-dataset/9008/2
-    Another version how to obtain the ResNet embeddings. Result is equal to get_resnet_embedding output
-    """
-
-    # set_seed(12345)
-    resnet_model = models.resnet50(pretrained=True)
-    modules = list(resnet_model.children())[:-1]
-    resnet_model = nn.Sequential(*modules)
-    for p in resnet_model.parameters():
-        p.requires_grad = False
-
-    # set_seed(12345)
-    # resnet_model.eval()
-    all_features = []
-    for X, y in train_loader:
-        features = resnet_model(X).data  # get the output from the last hidden layer of the pretrained resnet -> tensor
-        all_features.append(torch.squeeze(features).numpy())
-    embeddings = [item for sublist in all_features for item in sublist]
-    embeddings = np.concatenate(embeddings, axis=0)
-
-    # print(len(embeddings))           # 50000
-    # print(np.array(embeddings[0]).shape)         # 2048
-    return embeddings
-
-
 def load_train_data_for_agra(
         dataset, data_path, train_labels_path: str = None, num_valid_samples: int = None,
-        finetuning_batch_size: int = 32,
-        enc_model: str = "resnet50", finetuning: bool = False, finetuning_epochs: int = 2, metric: str = "acc"
+        finetuning_batch_size: int = 64,
+        enc_model: str = "resnet50", finetuning: bool = False, finetuning_epochs: int = 100, metric: str = "acc"
 ):
     if dataset in ['youtube', 'sms', 'trec', 'yoruba', 'hausa']:
         # load wrench dataset
-        train_data, test_data, valid_data = load_dataset(
-            data_path, dataset, dataset_type='TextDataset', extract_fn="tfidf", extract_feature=True
+        train_data, valid_data, test_data = load_dataset(
+            data_path, dataset, dataset_type='TextDataset', extract_fn=enc_model, extract_feature=True
         )
         # calculate train labels y_train with majority vote
         train_labels_noisy = get_mv_train_labels(train_data)
@@ -206,22 +173,35 @@ def load_train_data_for_agra(
     elif dataset in ['cifar', 'chexpert']:
 
         # load datasets
-        train_data, test_data, valid_data, y_valid, y_test = get_cifar_data(
-            os.path.join(data_path, dataset), num_valid_samples)
+        if dataset == 'cifar':
+            train_data, valid_data, test_data, y_valid, y_test = get_cifar_data(
+                os.path.join(data_path, dataset), num_valid_samples)
 
-        # upload the labels from the file
-        train_labels_dict = load_train_labels_from_file(data_path, train_labels_path, dataset)
-        y_train = np.array(list(train_labels_dict.values()))
+            # upload the labels from the file
+            train_labels_dict = load_train_labels_from_file(data_path, train_labels_path, dataset)
+            y_train = np.array(list(train_labels_dict.values())) # noisy labels
 
-        num_classes = max(int(max(y_train)), int(max(y_valid)), int(max(y_test))) + 1
+            num_classes = max(int(max(y_train)), int(max(y_valid)), int(max(y_test))) + 1
 
-        # load Cifar and CheXpert datasets and get encodings with resnet-50
-        train_features, train_labels_gold, train_labels_noisy, valid_features, valid_labels, test_features, test_labels \
-            = load_image_dataset(
-            data_path, dataset, train_data, test_data, valid_data, enc_model,
-            train_labels=y_train, num_classes=num_classes, finetuning=finetuning,
-            finetuning_epochs=finetuning_epochs, metric=metric, batch_size=finetuning_batch_size
-        )
+            # load Cifar and CheXpert datasets and get encodings with resnet-50
+            train_features, train_labels_gold, train_labels_noisy, valid_features, valid_labels, test_features, test_labels \
+                = load_image_dataset(
+                data_path, dataset, train_data, test_data, valid_data, enc_model,
+                train_labels=y_train, num_classes=num_classes, finetuning=finetuning,
+                finetuning_epochs=finetuning_epochs, metric=metric, batch_size=finetuning_batch_size
+            )
+        elif dataset == 'chexpert':
+            path_to_cache = os.path.join(data_path, dataset, "encoded_" + enc_model)
+
+            if os.path.exists(path_to_cache):
+                train_features = joblib.load(os.path.join(path_to_cache, f"train_embeddings_efficientnetb0.data"))
+                valid_features = joblib.load(os.path.join(path_to_cache, f"valid_embeddings_efficientnetb0.data"))
+                test_features = joblib.load(os.path.join(path_to_cache, f"test_embeddings_efficientnetb0.data"))
+
+                train_labels_gold = joblib.load(os.path.join(path_to_cache, f"train_labels.data"))  # no gold labels for chexpert; assing same as noisy labels as placeholder
+                train_labels_noisy = joblib.load(os.path.join(path_to_cache, f"train_labels_noisy.data"))
+                valid_labels = joblib.load(os.path.join(path_to_cache, f"valid_labels.data"))
+                test_labels = joblib.load(os.path.join(path_to_cache, f"test_labels.data"))
 
         # transform the data into wrench-compatible datasets
         train_data = AGRAImageDataSet(Tensor(train_features), Tensor(train_labels_noisy))
@@ -236,10 +216,13 @@ def load_train_data_for_agra(
 
 def load_image_dataset(
         data_path, dataset, train_data, test_data, valid_data, encoding: str = "resnet50", train_labels: List = None,
-        num_classes: int = None, batch_size: int = 32, finetuning: bool = False, finetuning_epochs: int = 2,
+        num_classes: int = None, batch_size: int = 64, finetuning: bool = False, finetuning_epochs: int = 100,
         metric: str = "acc"
 ):
-    """ Load the train, valid and test sets for image dataset (currently: Cifar, CheXpert) """
+    """
+    Load the train, valid and test embeddings for CIFAR-10.
+    If there are no embeddings on the device, a resnet will be fine-tuned for feature extraction.
+    """
 
     set = f"_finetuned_epoch{finetuning_epochs}_batchsize{batch_size}_old_setting_ver_2" if finetuning else ""
     path_to_cache = os.path.join(data_path, dataset, f"encoded_{encoding}{set}")
@@ -249,7 +232,7 @@ def load_image_dataset(
         valid_embeddings = joblib.load(os.path.join(path_to_cache, f"valid_embeddings_{encoding}.data"))
         test_embeddings = joblib.load(os.path.join(path_to_cache, f"test_embeddings_{encoding}.data"))
 
-        train_labels_gold = joblib.load(os.path.join(path_to_cache, f"train_labels.data"))
+        train_labels_gold = joblib.load(os.path.join(path_to_cache, f"train_labels.data")) # no gold labels for chexpert; same as noisy labels
         train_labels_noisy = joblib.load(os.path.join(path_to_cache, f"train_labels_noisy.data"))
         valid_labels = joblib.load(os.path.join(path_to_cache, f"valid_labels.data"))
         test_labels = joblib.load(os.path.join(path_to_cache, f"test_labels.data"))
@@ -257,13 +240,6 @@ def load_image_dataset(
         if type(train_labels_gold) is list:
             train_labels_gold = np.concatenate(train_labels_gold)
             assert train_labels_gold.shape[0] == train_embeddings.shape[0]
-
-        # train_loader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=2)
-        # all_labels = []
-        # for X, y in train_loader:
-        #     all_labels.append(y.cpu().detach().numpy())
-        # all_labels_fake = np.concatenate(all_labels)
-        # assert train_labels_gold == all_labels_fake
 
         if type(train_labels_noisy) is list:
             train_labels_noisy = np.concatenate(train_labels_noisy)
@@ -327,8 +303,6 @@ def load_image_dataset(
             pickle.dump(test_labels, file)
 
         print(f"New embeddings are calculated and saved to {path_to_cache}")
-
-        print(f"Now we are gonna try some crap, let's hope it works")
 
         set_seed(12345)
         train_loader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=2)
