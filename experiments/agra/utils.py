@@ -115,7 +115,7 @@ def finetune_resnet(
     assert metric in METRIC.keys()
     metric_fn = METRIC[metric]
 
-    criterion = torch.nn.BCELoss(reduction='mean')
+    criterion = torch.nn.CrossEntropyLoss(reduction='mean')
 
     optimizer = AdamW(f_model.parameters(), lr=0.001, weight_decay=0.0)
     f_model.train()
