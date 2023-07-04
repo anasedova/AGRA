@@ -3,3 +3,16 @@
 
 # ignore cache files
 .idea
+
+# ignore dataset files
+data
+
+# ignore deprecated files
+_depr*
+
+# ignore sbatch files
+*.sbatch
+*/*.sbatch
+
+# ignore results folder
+results
