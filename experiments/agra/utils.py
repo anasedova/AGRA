@@ -156,7 +156,7 @@ def finetune_resnet(
 def load_train_data_for_agra(
         dataset, data_path, train_labels_path: str = None, num_valid_samples: int = None,
         finetuning_batch_size: int = 64,
-        enc_model: str = "resnet50", finetuning: bool = False, finetuning_epochs: int = 100, metric: str = "acc"
+        enc_model: str = "resnet50", finetuning_epochs: int = 100
 ):
     """
     loads the specified dataset in a format suitable for AGRA
