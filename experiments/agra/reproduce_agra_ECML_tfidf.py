@@ -41,7 +41,6 @@ if __name__ == '__main__':
     parser.add_argument("--gold_label_path", help='path to the god training labels (only required for CIFAR-10)',  type=str, default=None)
     parser.add_argument("--num_valid_samples", help='number of validation instances that should be sampled from test set if no valid set is available (only required for CIFAR-10)',
                         type=int, default=5000)
-    parser.add_argument("--finetuning", help='If True fine-tunes a CNN to extract image embeddings (only required for CIFAR-10)', type=bool, default=False)
     parser.add_argument("--finetuning_epochs", help='Number of fine-tuning epochs if finetuining is True', type=int, default=2)
     parser.add_argument("--finetuning_batch_size", help='Batch size that is used for fine-tuning', type=int, default=2)
 
@@ -74,8 +73,7 @@ if __name__ == '__main__':
             # load dataset
             train_dataset, valid_dataset, test_dataset, train_labels_gold, train_labels_noisy = load_train_data_for_agra(
                     dataset, dataset_path, args.train_labels_path, args.num_valid_samples, args.finetuning_batch_size,
-                    encoding,
-                    finetuning=args.finetuning, finetuning_epochs=args.finetuning_epochs, metric=metric
+                    encoding, finetuning_epochs=args.finetuning_epochs
             )
             mislabeled = len(np.where(train_labels_gold != train_labels_noisy)[0])
             print('Noise rate:', mislabeled / len(train_labels_gold))
