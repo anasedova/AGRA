@@ -41,6 +41,14 @@ model update, excluded from the update, or assigned to an alternative label.
 
 ### Usage 
 
+Scripts for launching AGRA are available in the following folder: ``AGRA/experiments/agra``.
+
+The single label AGRA can be launched with ``AGRA/experiments/agra/run_AGRA_single_label.py``. 
+
+The results from the ECML PKDD'23 paper "Learning with Noisy Labels by Adaptive Gradient-Based Outlier Removal" can be 
+reproduced by running ``AGRA/experiments/agra/reproduce_agra_ECML_tfidf.py`` script.
+
+
 ---
 
 ### Citation
