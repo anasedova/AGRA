@@ -21,7 +21,7 @@ from torch.utils.data import DataLoader
 from utils import CheXpertDatasetProcessor, sample_held_out, extract_ids, train_and_validate_model
 from utils import set_seed, get_image_embedding
 
-train_model = False
+train_model = True
 
 ## Define storing location for model and emebeddings
 file_path = os.path.split(os.path.abspath(__file__))[0]

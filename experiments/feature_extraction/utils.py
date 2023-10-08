@@ -264,7 +264,7 @@ def sample_held_out(data: pd.DataFrame, dataset: Dataset, number_of_patients_val
     train_set.insert(1, "Id", ids)
 
     # select patients for validation set randomly, but patients should not overlap with those in the training set
-    held_out_idx = np.random.choice(np.unique(ids), size=number_of_patients_valid, replace=False)
+    held_out_idx = np.random.choice(np.unique(ids), size=number_of_patients_valid)
 
     train_sample = train_set[~train_set.Id.isin(held_out_idx)]
     held_out_sample = train_set[train_set.Id.isin(held_out_idx)]
